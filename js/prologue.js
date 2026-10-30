@@ -14,9 +14,14 @@ export function prologueOverlay(cold, onDone) {
   const playRow = h("div", { class: "row" });
   const spotBox = h("div", { class: "prologue-spot" });
   const next = h("button", { class: "btn", onclick: advance }, "Next");
+  // I7: comic-panel strip — sits ABOVE the text (never covering it); the
+  // panel for the current beat lights up.
+  const panelImgs = (cold.panels || []).map((src) => h("img", { class: "prologue-panel", src, alt: "", loading: "lazy" }));
+  const panelStrip = panelImgs.length ? h("div", { class: "prologue-panels" }, ...panelImgs) : null;
   const o = h("div", { class: "overlay prologue", role: "dialog", "aria-modal": "true", "aria-label": "Prologue" },
     h("div", { class: "brief-card" },
       h("p", { class: "eyebrow" }, "Prologue · " + sceneName), h("h2", {}, cold.title),
+      panelStrip,
       who, text, playRow,
       cold.spots && cold.spots.length ? h("div", {}, h("h3", {}, "Look around"), h("div", { class: "row prologue-spots" },
         cold.spots.map((sp) => h("button", { class: "chip", onclick: (e) => {
@@ -30,6 +35,7 @@ export function prologueOverlay(cold, onDone) {
 
   function showBeat() {
     const b = cold.beats[beat];
+    if (panelImgs.length) panelImgs.forEach((im, i) => im.classList.toggle("on", i === Math.min(beat, panelImgs.length - 1)));
     who.textContent = ctx.speakerName(b.speaker);
     text.textContent = b.text;
     clear(playRow).append(lineBtn(b.audio, b.text, b.speaker, "Listen"));

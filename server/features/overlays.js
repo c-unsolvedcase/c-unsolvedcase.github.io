@@ -22,6 +22,9 @@
 module.exports = {
   // ---------------------------------------------------------- Case 1
   case1: {
+    // I1: one hidden brass key per scene (Blender coords, beside an anchor
+    // hotspot). Pure bonus — keys never gate anything.
+    keys: { harbor_office: [-1.65, 2.4, 2.43], apartment: [0.95, 2.42, 2.13], archive: [0.35, 2.3, 1.33], ferry: [-2.95, 0, 1.08] },
     ambience: { harbor_office: "room", apartment: "room", archive: "hush", ferry: "water" },
     labBenches: { bilge_page: "photo", notepad_impression: "fingerprint", coat_box: "fingerprint", hatch_latch: "photo" },
     timeline: [
@@ -39,6 +42,7 @@ module.exports = {
 
   // ---------------------------------------------------------- Case 2
   case2: {
+    keys: { lobby: [-3.27, 0.6, 2.18], suite: [2.75, 0.8, 1.3], corridor: [-1.25, 1.5, 0.78], terrace: [2.35, 1, 0.68] },
     ambience: { lobby: "rain", suite: "room", corridor: "hush", terrace: "rain" },
     labBenches: { notebook_page: "photo", evening_shoes: "fingerprint", terrace_planter: "photo" },
     timeline: [
@@ -56,6 +60,7 @@ module.exports = {
     coldOpen: {
       scene: "lobby",
       title: "Before the gala ended",
+      panels: ["assets/panels/case2-1.jpg", "assets/panels/case2-2.jpg", "assets/panels/case2-3.jpg"],
       beats: [
         { speaker: "ada", text: "Before we open the file, walk the lobby with me. This is where the Meridian's gala ended that night — two hundred guests, and every one of them gone by eleven." },
         { speaker: "ada", text: "Helen Marlowe stayed behind. A historian, methodical, the sort who alphabetises her own bookshelf. She told the desk she had work to finish." },
@@ -72,6 +77,7 @@ module.exports = {
 
   // ---------------------------------------------------------- Case 3
   case3: {
+    keys: { stage: [2.7, 1.15, 1.33], dressing: [1.25, 1.95, 1.43], flies: [2.05, 1.2, 1.28], boxoffice: [-0.95, 1.95, 1.56], store: [3.45, -0.7, 1.1] },
     ambience: { stage: "hush", dressing: "room", flies: "hush", boxoffice: "room", store: "hush" },
     labBenches: { prompt_book: "photo", fallen_rope: "fingerprint" },
     timeline: [
@@ -87,6 +93,7 @@ module.exports = {
     coldOpen: {
       scene: "stage",
       title: "Two shows a night",
+      panels: ["assets/panels/case3-1.jpg", "assets/panels/case3-2.jpg", "assets/panels/case3-3.jpg"],
       beats: [
         { speaker: "bea", text: "Stand where the audience can't see you — the wings. Every theatre runs two shows: the one out front, and the one back here." },
         { speaker: "bea", text: "Margot Ellery played this stage for thirty years. She knew every board, every rope, every mark taped to the floor. Especially her own mark." },
@@ -103,6 +110,7 @@ module.exports = {
 
   // ---------------------------------------------------------- Case 4
   case4: {
+    keys: { mast: [2.75, -0.9, 0.56], lab: [2.05, 1.9, 1.48], comms: [-1.05, 1.9, 1.5], dorm: [-2.75, 1.8, 1.33], gear: [2.45, 1.6, 0.68] },
     ambience: { mast: "wind", lab: "room", comms: "room", dorm: "hush", gear: "room" },
     labBenches: { weather_record: "photo", mast_card: "fingerprint", check_core: "photo" },
     timeline: [
@@ -121,6 +129,7 @@ module.exports = {
     coldOpen: {
       scene: "comms",
       title: "The station's ear",
+      panels: ["assets/panels/case4-1.jpg", "assets/panels/case4-2.jpg", "assets/panels/case4-3.jpg"],
       beats: [
         { speaker: "hanna", text: "Before the file opens, look at this room. Comms is the station's ear — every word in or out of Kestrel passes across this desk." },
         { speaker: "hanna", text: "Six people winter here. Six. When something goes wrong at a polar station, there is no stranger to blame. There is only ever one of the six." },
@@ -137,6 +146,7 @@ module.exports = {
 
   // ---------------------------------------------------------- Case 5
   case5: {
+    keys: { berth: [-0.05, 2.2, 2.3], dining: [-3.05, 1.9, 1.53], sleeper: [-2.85, 1.9, 1.48], mailvan: [4.15, 2.2, 1.78], cab: [1.35, 1.9, 1.88] },
     ambience: { berth: "train", dining: "hush", sleeper: "train", mailvan: "train", cab: "train" },
     labBenches: { medicine_phial: "fingerprint", tumbler_test: "photo", source_bottle: "fingerprint" },
     timeline: [
@@ -154,6 +164,7 @@ module.exports = {
     coldOpen: {
       scene: "dining",
       title: "The last train north",
+      panels: ["assets/panels/case5-1.jpg", "assets/panels/case5-2.jpg", "assets/panels/case5-3.jpg"],
       beats: [
         { speaker: "elinor", text: "Board at Kingsmere, and mind the gap nobody minds. The Vesper is the last train north, and it keeps the hours the rest of the railway has forgotten." },
         { speaker: "elinor", text: "Dinner service, a sleeper car, a mail van full of other people's secrets. Aldous Fenn — retired inspector, travelling with a ledger that could hang a company — took his usual table." },
@@ -170,6 +181,7 @@ module.exports = {
 
   // ---------------------------------------------------------- Case 6
   case6: {
+    keys: { gallery: [0.55, 1.6, 1.9], workshop: [-3.05, 1.9, 1.28], archives: [4.45, 1.9, 1.88], gala: [-1.85, 2, 1.53], vault: [4.05, 2.2, 2.28] },
     ambience: { gallery: "hush", workshop: "room", archives: "hush", gala: "hush", vault: "room" },
     labBenches: { crown_flake: "photo", requisition: "fingerprint", security_log: "photo", chamber_tape: "fingerprint" },
     timeline: [
@@ -188,6 +200,7 @@ module.exports = {
     coldOpen: {
       scene: "gallery",
       title: "Everything has a label",
+      panels: ["assets/panels/case6-1.jpg", "assets/panels/case6-2.jpg", "assets/panels/case6-3.jpg"],
       beats: [
         { speaker: "fiona", text: "Come in quietly. Museums dislike noise almost as much as they dislike questions — and tonight we are going to ask a great many." },
         { speaker: "fiona", text: "The Sun Crown of Karash: twelve centuries old, and the heart of this museum. Dr. Ingrid Sauer was its keeper, and the most stubborn pair of eyes in the building." },

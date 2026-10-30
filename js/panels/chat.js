@@ -8,7 +8,11 @@ export function createChatPanel() {
   const input = h("input", { type: "text", maxlength: 240, placeholder: "Message your party…", "aria-label": "Message", autocomplete: "off" });
   const form = h("form", { class: "chat-form", onsubmit: (e) => { e.preventDefault(); const t = input.value.trim(); if (t) { ctx.send({ t: "chat", text: t }); input.value = ""; } } }, input, h("button", { class: "btn", type: "submit" }, "Send"));
   const emoji = h("div", { class: "emoji-bar" });
-  const el = h("div", { class: "panel chat-panel" }, list, emoji, form);
+  // I4: quick-chat — one-tap preset callouts (indices mirror the server list).
+  const QUICK = ["Look here!", "That's the lie!", "Check the lab", "Wait — re-read that", "I found something", "Trust me on this one"];
+  const quick = h("div", { class: "quick-bar", "aria-label": "Quick phrases" },
+    QUICK.map((q, i) => h("button", { class: "btn small ghost quick-chip", onclick: () => ctx.send({ t: "quick", idx: i }) }, q)));
+  const el = h("div", { class: "panel chat-panel" }, list, quick, emoji, form);
   let shown = false, drawnEmoji = false;
 
   function line(m) {

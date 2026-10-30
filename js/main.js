@@ -11,6 +11,7 @@ import { createEvidencePanel } from "./panels/evidence.js";
 import { createSuspectsPanel } from "./panels/suspects.js";
 import { createBoardPanel } from "./panels/board.js";
 import { createChatPanel } from "./panels/chat.js";
+import { recordKey, markPlayedToday, fmtTime } from "./progress.js";
 
 const root = document.getElementById("app");
 ctx.net = new Net();
@@ -41,7 +42,7 @@ function showEntry(code) {
       code,
       cases: catalogue && catalogue.cases,
       difficulties: catalogue && catalogue.difficulties,
-      onCreate: (name, caseId, difficulty) => connect({ t: "hello", create: true, name, caseId, difficulty }, name),
+      onCreate: (name, caseId, difficulty, modifiers) => connect({ t: "hello", create: true, name, caseId, difficulty, modifiers: modifiers || [] }, name),
       onJoin: (c, name) => connect({ t: "hello", code: c, name }, name)
     }));
   };
@@ -69,9 +70,10 @@ function buildGame() {
     board: createBoardPanel(), chat: createChatPanel()
   };
   const title = h("div", { class: "grow" });
+  const timer = h("div", { class: "run-timer hidden", "aria-label": "Run timer" }); // I3/I8 speedrun clock
   const goals = h("div", { class: "goal-bar" }, h("i"));
   const head = h("header", { class: "topbar" },
-    title,
+    title, timer,
     h("button", { class: "icon-btn", "aria-label": "Hint", onclick: hintSheet }, "💡"),
     h("button", { class: "icon-btn", "aria-label": "Case log", onclick: logSheet }, "📜"),
     h("button", { class: "icon-btn", "aria-label": "Party", onclick: partySheet }, "👥"),
@@ -115,8 +117,13 @@ function buildGame() {
     set("board", s.proposals.links.some((p) => p.by !== s.you) || (s.proposals.accuse && !(s.you in s.proposals.accuse.votes)));
   }
 
+  const timerIv = setInterval(() => {
+    const st = ctx.state;
+    if (st && st.startedAt && (st.modifiers || []).includes("speedrun")) timer.textContent = "⏱ " + fmtTime(Math.max(0, Math.round((Date.now() - st.startedAt) / 1000)));
+  }, 500);
   function update(s) {
     title.replaceChildren(h("strong", {}, s.chapter.title), h("small", {}, s.chapter.question));
+    timer.classList.toggle("hidden", !((s.modifiers || []).includes("speedrun") && s.startedAt));
     goals.firstChild.style.width = (s.chapter.goalsTotal ? (s.chapter.goalsDone / s.chapter.goalsTotal) * 100 : 0) + "%";
     for (const id in panels) panels[id].update(s);
     refreshBadges(s);
@@ -125,7 +132,7 @@ function buildGame() {
     if (!cur) select("scene");
   }
   ctx.on("unread", () => ctx.state && refreshBadges(ctx.state));
-  return { el, update, select, cleanup() { reportO.el.remove(); }, accuse: () => panels.board.openAccuse() };
+  return { el, update, select, cleanup() { reportO.el.remove(); clearInterval(timerIv); }, accuse: () => panels.board.openAccuse() };
 }
 
 function hintSheet() {
@@ -175,7 +182,12 @@ ctx.on("msg:state", (m) => {
     const now = s.cards.filter((c) => c.type === "conclusion").length;
     if (s.phase === "play" && now > before) setTimeout(() => audio.sfx("sting"), 380);
     if (prevState.phase === "play" && s.phase === "report") audio.sfx("sting_chapter");
+    // I8: live split at a chapter boundary during a speedrun-modifier run.
+    if ((s.modifiers || []).includes("speedrun") && s.startedAt && prevState.chapter && s.chapter.index > prevState.chapter.index) {
+      toast(`⏱ Split — end of chapter ${prevState.chapter.index + 1}: ${fmtTime(Math.round((Date.now() - s.startedAt) / 1000))}`, "good", 4200);
+    }
   }
+  if (s.phase === "play") markPlayedToday(); // I6 streak (idempotent per day)
   prevState = s;
   ctx.state = s;
   route(s);
@@ -195,6 +207,17 @@ ctx.on("msg:found", (m) => {
 ctx.on("msg:lab_done", (m) => { audio.sfx("lab"); });
 ctx.on("msg:briefing", (m) => { if (view === "game" || view === "lobby" || true) briefingOverlay(m); });
 ctx.on("msg:twist", (m) => { twistOverlay(m); });
+ctx.on("msg:confront", () => { audio.heartbeat(8000); ctx.emit("confront-fx"); }); // I2
+ctx.on("msg:key_found", (m) => { // I1
+  if (ctx.info && ctx.info.id) recordKey(ctx.info.id, m.scene);
+  audio.sfx("found");
+});
+ctx.on("msg:quick", (m) => { // I4
+  const p = ctx.player(m.pid);
+  if (!p || ctx.muted.has(m.pid)) return;
+  toast(`${p.name}: ${m.text}`, "", 2600);
+  if (m.pid !== ctx.pid) audio.sfx("msg");
+});
 ctx.on("msg:emote", (m) => {
   const p = ctx.player(m.pid);
   if (!p || ctx.muted.has(m.pid)) return;

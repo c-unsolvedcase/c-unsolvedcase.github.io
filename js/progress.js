@@ -14,9 +14,14 @@ export const RANKS = [
 export function loadProgress() {
   try {
     const p = JSON.parse(localStorage.getItem(KEY) || "null");
-    if (p && p.best && p.archive) return p;
+    if (p && p.best && p.archive) {
+      p.pb = p.pb || {};       // I8 personal bests (seconds per case)
+      p.keys = p.keys || {};   // I1 collected brass keys per case
+      p.play = p.play || null; // I6 streak { last: "YYYY-MM-DD", streak: n }
+      return p;
+    }
   } catch {}
-  return { best: {}, archive: {} };
+  return { best: {}, archive: {}, pb: {}, keys: {}, play: null };
 }
 
 export function saveProgress(p) {
@@ -49,16 +54,22 @@ export function badgesFor(r) {
   if (r.wrongLinks === 0) b.push({ id: "clean", label: "Clean Board", icon: "✨" });
   if (r.stars === 5) b.push({ id: "flawless", label: "Flawless", icon: "⭐" });
   if (r.difficulty === "master") b.push({ id: "mastermind", label: "Mastermind", icon: "👑" });
+  if (r.earlyBonus) b.push({ id: "earlycall", label: "Early Call", icon: "⏱" }); // I9
   return b;
 }
 
 // Record a solved result (best run per case wins the archive slot; best
 // stars always count toward rank). Returns this run's badges + entry.
+// I3: a MODIFIED run (challenge modifiers) is flagged and never touches the
+// rank bests or the canonical archive entry — standard runs are untouched.
+// I8: personal-best times are kept per case (unmodified runs, plus runs
+// carrying the speedrun modifier — those exist to be timed).
 export function recordResult(info, s) {
   const r = s.result;
   if (!r || !r.solved || !r.caseId) return null;
   const p = loadProgress();
   const badges = badgesFor(r);
+  const modified = Array.isArray(r.modified) && r.modified.length ? [...r.modified] : null;
   const entry = {
     caseId: r.caseId,
     title: (info && info.meta && info.meta.title) || r.caseId,
@@ -72,11 +83,53 @@ export function recordResult(info, s) {
     truth: r.truth || null,
     text: r.text || "",
     timeline: r.timeline || null,
-    solvedAt: Date.now()
+    solvedAt: Date.now(),
+    modified
   };
-  const prev = p.archive[r.caseId];
-  if (!prev || entry.stars >= prev.stars) p.archive[r.caseId] = entry;
-  if ((p.best[r.caseId] || 0) < r.stars) p.best[r.caseId] = r.stars;
+  if (!modified) {
+    const prev = p.archive[r.caseId];
+    if (!prev || entry.stars >= prev.stars) p.archive[r.caseId] = entry;
+    if ((p.best[r.caseId] || 0) < r.stars) p.best[r.caseId] = r.stars;
+  }
+  if (r.timeSec != null && (!modified || modified.includes("speedrun"))) {
+    if (!p.pb[r.caseId] || r.timeSec < p.pb[r.caseId]) p.pb[r.caseId] = r.timeSec;
+  }
   saveProgress(p);
-  return { progress: p, badges, entry: p.archive[r.caseId] };
+  return { progress: p, badges, entry: modified ? entry : p.archive[r.caseId] };
+}
+
+// ---- I1: brass-key collection (local mirror of the hunts you joined) ----
+export const TOTAL_KEYS = 28; // one per scene across all six cases
+
+export function recordKey(caseId, sceneId) {
+  const p = loadProgress();
+  const list = p.keys[caseId] || (p.keys[caseId] = []);
+  if (!list.includes(sceneId)) { list.push(sceneId); saveProgress(p); }
+  return keyProgress(p);
+}
+
+export function keyProgress(p) {
+  const found = Object.values(p.keys || {}).reduce((a, l) => a + (l ? l.length : 0), 0);
+  return { found, total: TOTAL_KEYS, complete: found >= TOTAL_KEYS };
+}
+
+// ---- I6: daily spotlight + play streak ----
+const dayStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+export function dailyCaseId(cases, now = new Date()) {
+  if (!cases || !cases.length) return null;
+  const day = Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400000);
+  return cases[((day % cases.length) + cases.length) % cases.length].id;
+}
+
+export function markPlayedToday(now = new Date()) {
+  const p = loadProgress();
+  const today = dayStr(now);
+  if (!p.play || p.play.last !== today) {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    const streak = p.play && p.play.last === dayStr(y) ? (p.play.streak || 0) + 1 : 1;
+    p.play = { last: today, streak };
+    saveProgress(p);
+  }
+  return p.play;
 }

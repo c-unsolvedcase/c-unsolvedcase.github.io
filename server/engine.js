@@ -20,7 +20,7 @@ const PERSIST = [
   "code", "createdAt", "touchedAt", "hostId", "players", "order", "roleShift", "seq", "chatLog", "feedLog", "reports",
   "phase", "chapter", "shared", "testimonies", "conclusions", "cardOrder", "held", "inspected", "boardLinks", "boardPos",
   "notes", "pending", "accusation", "suspectState", "hintLevel", "hintsUsed", "wrongLinks", "wrongAccusations", "stats", "result",
-  "difficulty", "startedAt"
+  "difficulty", "startedAt", "keysFound", "modifiers"
 ];
 
 // Room difficulty presets (host-chosen at party creation, carried in hello).
@@ -62,6 +62,7 @@ class Room {
     this.outbox = [];
     this.rates = {};
     this._resetProgress();
+    this.modifiers = [];     // I3: challenge modifiers from party creation (survive restart; set by hello)
   }
 
   _resetProgress() {
@@ -87,6 +88,7 @@ class Room {
     this.stats = { found: {}, links: {}, asked: {}, lab: {}, gated: {}, wrong: {} };
     this.result = null;
     this.startedAt = null;
+    this.keysFound = [];     // I1: scene ids whose hidden brass key this party collected
   }
 
   // ------------------------------------------------------------ plumbing
@@ -325,6 +327,26 @@ class Room {
     return null;
   }
 
+  // I1 — hidden brass keys: one per scene, defined in the feature overlay
+  // (Case 1 included — its data files stay untouched). Party-shared, pure
+  // bonus: collecting never gates, unlocks or scores anything.
+  keyMap() { return (OVERLAYS[this.C.id] || {}).keys || {}; }
+
+  collectKey(pid, sceneId) {
+    if (this.phase !== "play") return err("No key hunting right now.");
+    const map = this.keyMap();
+    if (!map[sceneId]) return err("No key hides there.");
+    if (!this.sceneIds().has(sceneId)) return err("That room isn't open yet.");
+    if (this.keysFound.includes(sceneId)) return err("Your party already found that key.");
+    this.keysFound.push(sceneId);
+    const total = Object.keys(map).length;
+    const name = this.players[pid] ? this.players[pid].name : "A detective";
+    this.feed("story", `🗝 ${name} found a hidden brass key! (${this.keysFound.length}/${total} in this case)`);
+    this.toast("all", `🗝 ${name} found a hidden brass key!`);
+    this.emit("all", { t: "key_found", scene: sceneId, by: pid, count: this.keysFound.length, total });
+    return good();
+  }
+
   inspect(pid, hotspotId) {
     if (this.phase !== "play") return err("Nothing to inspect right now.");
     const f = this._findHotspot(hotspotId);
@@ -475,6 +497,22 @@ class Room {
     if (id && this._addTestimony(id)) this.feed("testimony", `${s.name} said something worth noting: ${this.C.testimonies[id].title}.`);
   }
 
+  // I2 (interrogation pressure): a testimony counts as a CONFRONTATION when
+  // it is the moment a suspect is caught — its title says they "admit"
+  // something, or its text is the confession ("X breaks: ..."). Purely
+  // presentational: the engine flags the log entry and emits a `confront`
+  // event so clients can add drama (heartbeat, shaken portrait). No scoring,
+  // gating or state depends on it. Callers invoke this only for a testimony
+  // granted by the current action (freshness checked there). Returns the
+  // confrontation kind, or null.
+  _confrontKind(id) {
+    const t = id && this.C.testimonies[id];
+    if (!t) return null;
+    if (/\bbreaks\b/.test(t.text || "")) return "confess";
+    if (/admits/i.test(t.title || "")) return "admit";
+    return null;
+  }
+
   ask(pid, sid, topicId) {
     if (this.phase !== "play") return err("Not right now.");
     if (!this.canUse(pid, "interrogator")) return err("Only the Interrogator leads the questioning. Suggest a question instead.");
@@ -487,11 +525,13 @@ class Room {
     if (this._lock(sid, topic).length) return err("You don't have enough to press that yet.");
     st.asked.push(topic.id);
     st.trust = cap(st.trust + (topic.trust || 0));
-    this._log(sid, { type: "ask", label: topic.label, speaker: sid, text: topic.answer, audio: voiceKey(sid, topic.answer), by: pid });
+    const kind = topic.gives && !this.testimonies[topic.gives] ? this._confrontKind(topic.gives) : null;
+    this._log(sid, { type: "ask", label: topic.label, speaker: sid, text: topic.answer, audio: voiceKey(sid, topic.answer), by: pid, ...(kind ? { confront: kind } : {}) });
     this.stats.asked[pid] = (this.stats.asked[pid] || 0) + 1;
     const rq = topic.requires || {};
     if ((rq.clues || []).length || (rq.cards || []).length || rq.minPressure || rq.minTrust) this.stats.gated[pid] = (this.stats.gated[pid] || 0) + 1;
     this._testimony(s, topic.gives);
+    if (kind) this.emit("all", { t: "confront", sid, kind });
     return good();
   }
 
@@ -510,13 +550,16 @@ class Room {
       return good();
     }
     const first = !st.used[cardId];
+    let kind = null;
     if (first) {
       st.used[cardId] = true;
       st.pressure = cap(st.pressure + (rule.pressure || 0));
       st.trust = cap(st.trust + (rule.trust || 0));
+      kind = rule.gives && !this.testimonies[rule.gives] ? this._confrontKind(rule.gives) : null;
       this._testimony(s, rule.gives);
     }
-    this._log(sid, { type: "present", cardTitle: title, speaker: sid, text: rule.reply, audio: voiceKey(sid, rule.reply), by: pid, repeat: !first });
+    this._log(sid, { type: "present", cardTitle: title, speaker: sid, text: rule.reply, audio: voiceKey(sid, rule.reply), by: pid, repeat: !first, ...(kind ? { confront: kind } : {}) });
+    if (kind) this.emit("all", { t: "confront", sid, kind });
     return good();
   }
 
@@ -649,7 +692,15 @@ class Room {
   }
 
   accusePropose(pid, sel) {
-    if (this.phase !== "play" || !this.isFinalChapter()) return err("Finish the investigation before accusing anyone.");
+    if (this.phase !== "play") return err("Accusations happen during the investigation.");
+    // I9 — early-accusation gamble (opt-in): from the SECOND chapter onward
+    // (chapter index >= 1) the party may accuse before the final chapter.
+    // Correct: +1 bonus star (applied after penalties, capped at 5). Wrong:
+    // reopening costs double (retry() adds 2 to wrongAccusations). A
+    // final-chapter accusation is exactly the pre-Round-2 behaviour, so
+    // parties that never gamble see zero change (Case 1 baseline proof).
+    const early = !this.isFinalChapter();
+    if (early && this.chapter < 1) return err("Too early to accuse anyone — finish the first chapter first.");
     if (this.accusation) return err("An accusation is already being voted on.");
     sel = sel || {};
     const A = this.C.accusation;
@@ -660,9 +711,11 @@ class Room {
     if (!this.conclusions[sel.proof]) return err("Choose a key proof from your conclusions.");
     const pick = { culprit: sel.culprit, motive: sel.motive, method: sel.method, proof: sel.proof };
     if (this.hasAccomplice()) pick.accomplice = sel.accomplice;
-    this.accusation = { by: pid, sel: pick, votes: { [pid]: true }, at: Date.now() };
+    this.accusation = { by: pid, sel: pick, votes: { [pid]: true }, at: Date.now(), early };
     const who = this.C.suspects.find((s) => s.id === sel.culprit).name;
-    this.feed("board", `${this.players[pid].name} proposes naming ${who}. The party must vote.`);
+    this.feed("board", early
+      ? `${this.players[pid].name} wants to accuse ${who} EARLY — a gamble: right earns a bonus star, wrong costs double. The party must vote.`
+      : `${this.players[pid].name} proposes naming ${who}. The party must vote.`);
     this._resolveAccusation();
     return good();
   }
@@ -691,7 +744,7 @@ class Room {
     if (yes === no) pass = !!a.votes[this.hostId];
     this.accusation = null;
     if (!pass) { this.feed("board", "The party decided not to make that accusation."); this.toast("all", "The accusation was voted down."); return; }
-    this._submit(a.sel);
+    this._submit(a.sel, !!a.early);
   }
 
   // End-of-case awards, computed from the per-player stats the engine already
@@ -723,7 +776,7 @@ class Room {
     return out;
   }
 
-  _submit(sel) {
+  _submit(sel, early) {
     const ans = this.C.accusation.answer;
     const hasAcc = this.hasAccomplice();
     const culpritOk = sel.culprit === ans.culprit, motiveOk = sel.motive === ans.motive;
@@ -747,6 +800,7 @@ class Room {
         stars = Math.max(2, stars - penalty);
       }
     }
+    if (early && solved) stars = Math.min(5, stars + 1); // I9 bonus, after penalties
     const truth = solved ? this.C.epilogue.truth : null;
     this.result = {
       solved, stars, culprit: sel.culprit, culpritOk, motiveOk, methodOk, proofOk,
@@ -761,6 +815,8 @@ class Room {
     this.result.difficulty = this.difficulty;
     this.result.caseId = this.C.id;
     this.result.timeSec = this.startedAt ? Math.max(1, Math.round((Date.now() - this.startedAt) / 1000)) : null;
+    if (early) { if (solved) this.result.earlyBonus = true; else this.result.earlyFail = true; } // I9 markers (final-chapter runs never set them)
+    if (this.modifiers.length) this.result.modified = [...this.modifiers]; // I3: scoring flagged as modified
     if (solved) {
       this.result.awards = this._awards();
       const tl = (OVERLAYS[this.C.id] || {}).timeline;
@@ -773,10 +829,13 @@ class Room {
   retry(pid) {
     if (this.hostId !== pid) return err("Only the host can reopen the case.");
     if (this.phase !== "result" || !this.result || this.result.solved) return err("There is nothing to reopen.");
+    const dbl = this.result.earlyFail ? 2 : 1; // I9: a failed early gamble costs double
     this.result = null;
-    this.wrongAccusations++;
+    this.wrongAccusations += dbl;
     this.phase = "play";
-    this.feed("story", "The case was reopened. Each failed accusation costs a star.");
+    this.feed("story", dbl === 2
+      ? "The case was reopened. The failed early accusation costs double — two stars."
+      : "The case was reopened. Each failed accusation costs a star.");
     return good();
   }
 
@@ -821,6 +880,18 @@ class Room {
     if (!this.hasCard(cardId)) return err("The party doesn't hold that card.");
     if (this.limited(pid, "react", 8, 5000)) return err("Too many reactions.");
     this.emit("all", { t: "react", pid, card: cardId, e });
+    return good();
+  }
+
+  // I4 — quick chat: one-tap preset phrases for fast co-op callouts. Relayed
+  // to everyone like reactions AND written into the chat log (kind "quick")
+  // so nobody misses one. Server owns the phrase list: clients send an index.
+  quick(pid, idx) {
+    const QUICK = ["Look here!", "That's the lie!", "Check the lab", "Wait — re-read that", "I found something", "Trust me on this one"];
+    if (!Number.isInteger(idx) || idx < 0 || idx >= QUICK.length) return err("Unknown phrase.");
+    if (this.limited(pid, "quick", 6, 5000)) return err("Too many quick phrases.");
+    this._pushChat(pid, QUICK[idx], "quick");
+    this.emit("all", { t: "quick", pid, idx, text: QUICK[idx] });
     return good();
   }
 
@@ -913,10 +984,13 @@ class Room {
       board: { links: this.boardLinks, pos: this.boardPos, notes: this.notes },
       proposals: {
         links: Object.values(this.pending).map((l) => ({ id: l.id, a: l.a, b: l.b, by: l.by })),
-        accuse: this.accusation ? { by: this.accusation.by, sel: this.accusation.sel, votes: this.accusation.votes } : null
+        accuse: this.accusation ? { by: this.accusation.by, sel: this.accusation.sel, votes: this.accusation.votes, early: !!this.accusation.early } : null
       },
       hints: { used: this.hintsUsed, left: Math.min(ch.hints.length, this.diffParams().hintsPerChapter) - lvl, revealed: ch.hints.slice(0, lvl) },
       difficulty: this.difficulty,
+      keys: { map: this.keyMap(), found: this.keysFound },
+      modifiers: this.modifiers,
+      startedAt: this.startedAt,
       timeline: this._timelineView(),
       feed: this.feedLog.slice(-40),
       result: this.result,

@@ -2,7 +2,15 @@
 import { h, clear } from "./dom.js";
 import { ctx } from "./ctx.js";
 import { sheet, shareInvite, partySheet, settingsSheet, howToSheet, lineBtn, voiceControls } from "./sheets.js";
-import { loadProgress, totalStars, rankFor, fmtTime, recordResult } from "./progress.js";
+import { loadProgress, totalStars, rankFor, fmtTime, recordResult, dailyCaseId, keyProgress } from "./progress.js";
+
+// I3 challenge modifiers (offered only for already-solved cases).
+const MODS = [
+  { id: "lightsout", icon: "🌑", label: "Lights Out", hint: "near-dark scenes, a small pool of light" },
+  { id: "nonotes", icon: "🙈", label: "No Notes", hint: "board links hidden until each chapter ends" },
+  { id: "speedrun", icon: "⏱", label: "Speedrun", hint: "live timer + chapter splits" }
+];
+export const MOD_LABEL = { lightsout: "Lights Out", nonotes: "No Notes", speedrun: "Speedrun" };
 import { buildShareCard, shareResultCard, downloadResultCard, DIFF_LABEL } from "./sharecard.js";
 import { replayOverlay } from "./replay.js";
 import { prologueOverlay } from "./prologue.js";
@@ -25,44 +33,77 @@ export function entryScreen({ code, cases, difficulties, onCreate, onJoin }) {
   const list = (cases && cases.length) ? cases : [{ id: "case1", title: "The Last Ferry", teaser: "Ten years ago a woman vanished. The pier says she jumped. The page says otherwise.", difficulty: "Standard", players: "1–4", chapters: 5, suspects: 5 }];
   const diffs = (difficulties && difficulties.length) ? difficulties : [{ id: "standard", label: "Standard" }];
   let selCase = list[0].id, selDiff = "standard";
+  const selMods = new Set(); // I3
   const tag = h("p", { class: "tag" }, "");
   const caseBox = h("div", { class: "stack" });
   const diffBox = h("div", { class: "seg", role: "radiogroup", "aria-label": "Difficulty" });
+  const modBox = h("div", { class: "stack" });
   const prog = loadProgress();
   function paint() {
     const cur = list.find((c) => c.id === selCase) || list[0];
     tag.textContent = `Case ${list.indexOf(cur) + 1}: ${cur.title}`;
     clear(caseBox);
     list.forEach((c, i) => {
-      const best = prog.best[c.id] || 0, arch = prog.archive[c.id];
+      const best = prog.best[c.id] || 0, arch = prog.archive[c.id], pb = prog.pb[c.id];
       caseBox.append(h("button", { class: "choice" + (c.id === selCase ? " on" : ""), "aria-pressed": c.id === selCase ? "true" : "false", onclick: () => { selCase = c.id; paint(); } },
         h("strong", {}, `Case ${i + 1}: ${c.title}`), h("br"), h("small", {}, c.teaser || ""), h("br"),
         h("small", {}, `${c.difficulty} · ${c.chapters} chapters · ${c.suspects} suspects · ${c.players} players`),
         best ? h("span", { class: "case-stars", "aria-label": "Best: " + best + " stars" }, " " + "★".repeat(best) + "☆".repeat(5 - best)) : null,
+        pb ? h("span", { class: "case-pb" }, " ⏱ best " + fmtTime(pb)) : null,
         arch && arch.badges && arch.badges.length ? h("span", { class: "case-badges" }, " " + arch.badges.map((b) => b.icon).join(" ")) : null));
     });
     clear(diffBox);
     diffs.forEach((d) => diffBox.append(h("button", { class: d.id === selDiff ? "on" : "", "aria-pressed": d.id === selDiff ? "true" : "false", onclick: () => { selDiff = d.id; paint(); } }, d.label)));
+    // I3: modifiers unlock only for a case this device has already solved.
+    clear(modBox);
+    if (prog.best[selCase] > 0) {
+      modBox.append(h("p", { class: "muted" }, "Challenge modifiers — replay with a twist (scoring is flagged, rank bests stay safe)"));
+      MODS.forEach((m) => modBox.append(h("button", { class: "choice mod-choice" + (selMods.has(m.id) ? " on" : ""), "aria-pressed": selMods.has(m.id) ? "true" : "false",
+        onclick: () => { selMods.has(m.id) ? selMods.delete(m.id) : selMods.add(m.id); paint(); } },
+        h("strong", {}, `${m.icon} ${m.label}`), h("br"), h("small", {}, m.hint))));
+    } else selMods.clear();
   }
   paint();
+  // R4: the detective rank greets the player at the TOP of the entry screen
+  // (it used to sit under the create-party card, below the fold).
+  const rankLine = (() => {
+    const total = totalStars(prog), rank = rankFor(total);
+    return h("div", { class: "rank-line", "aria-label": "Your detective rank" },
+      h("span", { class: "rank-badge" }, "🎖"), h("strong", {}, rank.name),
+      h("small", {}, ` ${total} star${total === 1 ? "" : "s"} earned` + (rank.next ? ` · ${rank.next.at - total} to ${rank.next.name}` : " · the highest rank")));
+  })();
+  // I6: case-of-the-day spotlight + streak + I1 key progress, right under
+  // the rank line — the daily hooks live at the top of the screen.
+  const dailyBox = (() => {
+    const did = dailyCaseId(list);
+    const dc = list.find((c) => c.id === did);
+    if (!dc) return null;
+    const kp = keyProgress(prog);
+    const chips = [];
+    if (prog.play && prog.play.streak > 0) chips.push(h("span", { class: "daily-chip" }, `🔥 ${prog.play.streak}-day streak`));
+    chips.push(h("span", { class: "daily-chip" }, `🗝 ${kp.found}/${kp.total} brass keys`));
+    if (kp.complete) chips.push(h("span", { class: "daily-chip collector" }, "🏆 Collector"));
+    return h("div", { class: "card-box daily-box" },
+      h("h3", {}, "📅 Case of the day"),
+      h("button", { class: "choice daily-choice", onclick: () => { selCase = dc.id; paint(); } },
+        h("strong", {}, dc.title), h("br"), h("small", {}, dc.teaser || "")),
+      chips.length ? h("div", { class: "row daily-chips" }, ...chips) : null);
+  })();
   return h("main", { class: "screen entry" },
     h("div", { class: "title-block" }, h("p", { class: "eyebrow" }, "A co-op mystery for 1–4 detectives"), h("h1", {}, "Unsolved Case"), tag),
+    rankLine,
+    dailyBox,
     h("div", { class: "card-box" }, name,
       code
         ? h("div", {}, h("p", { class: "muted" }, "You've been invited to party ", h("strong", {}, code), "."), h("button", { class: "btn big", onclick: go((n) => onJoin(code, n)) }, "Join the investigation"))
         : h("div", { class: "stack" },
             h("p", { class: "muted" }, "Choose a case"), caseBox,
             h("p", { class: "muted" }, "Difficulty"), diffBox,
-            h("button", { class: "btn big", onclick: go((n) => onCreate(n, selCase, selDiff)) }, "Start a new party"),
+            modBox,
+            h("button", { class: "btn big", onclick: go((n) => onCreate(n, selCase, selDiff, [...selMods])) }, "Start a new party"),
             h("div", { class: "or" }, "or join friends"),
             h("div", { class: "row" }, codeIn, h("button", { class: "btn", onclick: go((n) => { const c = codeIn.value.trim().toUpperCase(); if (c.length < 4) { err.textContent = "Enter the party code."; return; } onJoin(c, n); }) }, "Join"))),
       err),
-    (() => {
-      const total = totalStars(prog), rank = rankFor(total);
-      return h("div", { class: "rank-line", "aria-label": "Your detective rank" },
-        h("span", { class: "rank-badge" }, "🎖"), h("strong", {}, rank.name),
-        h("small", {}, ` ${total} star${total === 1 ? "" : "s"} earned` + (rank.next ? ` · ${rank.next.at - total} to ${rank.next.name}` : " · the highest rank")));
-    })(),
     (() => {
       const solved = Object.values(prog.archive);
       if (!solved.length) return null;
@@ -80,10 +121,13 @@ export function entryScreen({ code, cases, difficulties, onCreate, onJoin }) {
 // and the door back into the verdict replay. Local data only; unsolved cases
 // never appear here, so nothing can be spoiled.
 export function archiveSheet(e) {
+  const pb = loadProgress().pb[e.caseId]; // I8
   return sheet({ title: e.title, render: (b) => {
     b.append(
       h("div", { class: "stars", "aria-label": e.stars + " stars" }, [1, 2, 3, 4, 5].map((i) => h("span", { class: i <= e.stars ? "on" : "" }, "★"))),
       h("p", { class: "muted center" }, `${DIFF_LABEL[e.difficulty] || "Standard"}${e.timeSec != null ? " · solved in " + fmtTime(e.timeSec) : ""} · ${e.players.join(", ")}`),
+      pb != null ? h("p", { class: "muted center" }, `⏱ Personal best: ${fmtTime(pb)}`) : null,
+      e.modified && e.modified.length ? h("p", { class: "muted center" }, `⚑ Best entry from a modified run: ${e.modified.map((m) => MOD_LABEL[m] || m).join(" · ")}`) : null,
       e.awards && e.awards.length ? h("div", {}, h("h3", {}, "Honours"), ...e.awards.map((a) => h("div", { class: "award-row" }, h("span", { class: "award-ico" }, a.icon), h("span", {}, h("strong", {}, a.label), " — ", a.name)))) : null,
       e.badges && e.badges.length ? h("div", {}, h("h3", {}, "Mastery"), h("div", { class: "row" }, e.badges.map((x) => h("span", { class: "badge-chip" }, x.icon + " " + x.label)))) : null,
       e.truth ? h("div", {}, h("h3", {}, "What really happened"), h("div", { class: "typewriter" }, e.truth)) : null,
@@ -215,6 +259,8 @@ export function resultScreen() {
         "accompliceOk" in r ? h("li", { class: r.accompliceOk ? "ok" : "no" }, "Accomplice") : null,
         h("li", { class: r.motiveOk ? "ok" : "no" }, "Motive"),
         h("li", { class: r.methodOk ? "ok" : "no" }, "Method"), h("li", { class: r.proofOk ? "ok" : "no" }, "Proof")),
+      r.modified && r.modified.length ? h("p", { class: "modified-note" }, `⚑ Modified run — ${r.modified.map((m) => MOD_LABEL[m] || m).join(" · ")}. Rank bests were not touched.`) : null,
+      r.earlyBonus ? h("p", { class: "modified-note" }, "⏱ Early call! The gamble paid off: +1 bonus star.") : null,
       h("p", { class: "muted center" }, `Hints used: ${r.hintsUsed} · Wrong links: ${r.wrongLinks} · Failed accusations: ${r.wrongAccusations}`),
       h("p", { class: "muted center" }, `${DIFF_LABEL[r.difficulty || s.difficulty] || "Standard"}${r.timeSec != null ? " · " + fmtTime(r.timeSec) : ""}`),
       r.solved && r.awards && r.awards.length

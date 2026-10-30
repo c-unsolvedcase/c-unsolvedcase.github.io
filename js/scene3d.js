@@ -15,6 +15,15 @@ function iconTexture(kind, color) {
   g.lineWidth = 7; g.strokeStyle = color; g.fillStyle = color;
   g.shadowColor = color; g.shadowBlur = 14;
   if (kind === "new") {
+    // R3: dark backing disc first — on bright props (white paper, lit walls)
+    // the bare gold ring washed out to invisibility (the Case 1 wall-calendar
+    // bug: the marker rendered at the right spot but was unreadable against
+    // the calendar's white paper). The marker now carries its own contrast.
+    g.shadowBlur = 0;
+    const bg = g.createRadialGradient(0, 0, 8, 0, 0, 58);
+    bg.addColorStop(0, "rgba(10,8,22,0.62)"); bg.addColorStop(0.7, "rgba(10,8,22,0.45)"); bg.addColorStop(1, "rgba(10,8,22,0)");
+    g.fillStyle = bg; g.beginPath(); g.arc(0, 0, 58, 0, 7); g.fill();
+    g.shadowColor = color; g.shadowBlur = 14; g.strokeStyle = color; g.fillStyle = color;
     g.beginPath(); g.arc(0, 0, 38, 0, 7); g.stroke();
     g.shadowBlur = 0; g.font = "bold 48px Georgia, serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("?", 0, 4);
   } else if (kind === "held") {
@@ -28,6 +37,27 @@ function iconTexture(kind, color) {
     g.shadowBlur = 0; g.beginPath(); g.arc(0, 0, 8, 0, 7); g.fill();
   } else if (kind === "ping") {
     g.lineWidth = 9; g.beginPath(); g.arc(0, 0, 50, 0, 7); g.stroke();
+  } else if (kind === "key") {
+    // I1: hidden brass key — dark backing, brass ring, key glyph.
+    g.shadowBlur = 0;
+    const bg = g.createRadialGradient(0, 0, 6, 0, 0, 56);
+    bg.addColorStop(0, "rgba(10,8,22,0.55)"); bg.addColorStop(1, "rgba(10,8,22,0)");
+    g.fillStyle = bg; g.beginPath(); g.arc(0, 0, 56, 0, 7); g.fill();
+    g.shadowColor = "#d4af37"; g.shadowBlur = 16; g.strokeStyle = "#d4af37";
+    g.lineWidth = 5; g.beginPath(); g.arc(0, 0, 44, 0, 7); g.stroke();
+    g.shadowBlur = 10; g.font = "50px serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText("🗝", 0, 4);
+  } else if (kind === "uvglow") {
+    // UV trace: a bright fluorescent core inside a strong ring. Drawn white-hot
+    // so the sprite's material colour (the hotspot's state colour) tints it.
+    g.shadowBlur = 26;
+    g.beginPath(); g.arc(0, 0, 40, 0, 7); g.lineWidth = 8; g.stroke();
+    const grad = g.createRadialGradient(0, 0, 2, 0, 0, 26);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.55, "rgba(255,255,255,0.85)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad; g.shadowBlur = 18;
+    g.beginPath(); g.arc(0, 0, 26, 0, 7); g.fill();
   } else { // flavor: a small dot with a faint ring
     g.lineWidth = 4; g.globalAlpha = 0.7; g.beginPath(); g.arc(0, 0, 22, 0, 7); g.stroke(); g.beginPath(); g.arc(0, 0, 6, 0, 7); g.fill();
   }
@@ -37,7 +67,7 @@ function iconTexture(kind, color) {
 }
 
 const COLORS = { new: "#ffc05a", held: "#6fe0d2", shared: "#8fd49a", taken: "#9aa3b2", flavor: "#d8dde8" };
-const UV_BG = new THREE.Color(0x07040f);
+const UV_BG = new THREE.Color(0x0d0721);
 
 export class SceneView {
   constructor(canvas, opts) {
@@ -57,9 +87,16 @@ export class SceneView {
     this.tex = {};
     for (const k of Object.keys(COLORS)) this.tex[k] = iconTexture(k, COLORS[k]);
     this.tex.ping = iconTexture("ping", "#ffffff");
+    this.tex.uvglow = iconTexture("uvglow", "#e6dcff");
+    this.tex.key = iconTexture("key", "#d4af37");
+    this.keyPos = null;       // I1: Blender pos of this scene's unfound key (or null)
+    this.keyItem = null;      // I1: { sprite, base, ph }
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 60);
     this.uv = false;
-    this.uvLight = new THREE.PointLight(0x9a6bff, 0, 12, 1.2);
+    this.uvLight = new THREE.PointLight(0x9a6bff, 0, 18, 1.0);
+    this.dark = false;        // I3 Lights Out modifier
+    this.camLight = new THREE.PointLight(0xffe0b0, 0, 4.5, 1.2); // I3: small personal light radius
+    this.flickerT = 0;        // I5: atmosphere flicker start time
     this.orbit = null;
     this.ptr = new Map();
     this.running = false;
@@ -120,6 +157,7 @@ export class SceneView {
     this.orbit = rec.orbit;
     this.renderer.toneMappingExposure = rec.exposure;
     rec.scene.add(this.uvLight);
+    rec.scene.add(this.camLight);
     this._applyUV();
     this.rebuildHotspots();
     return rec;
@@ -139,15 +177,34 @@ export class SceneView {
     const bg = on ? UV_BG : rec.bg;
     rec.scene.background = bg;
     if (rec.scene.fog) rec.scene.fog.color.copy(bg);
-    rec.hemi.color.set(on ? 0x7a5cff : 0x8fa4d8);
-    rec.hemi.intensity = rec.hemiI * (on ? 0.45 : 1);
+    // Round-2 UV tune: the first cut was too dark to read the room. UV now
+    // keeps most of the scene legible (violet wash, not blackout) and the
+    // lamp is much stronger — the traces themselves do the glowing (see
+    // rebuildHotspots' uvglow sprites).
+    rec.hemi.color.set(on ? 0x8a6cff : 0x8fa4d8);
+    rec.hemi.intensity = rec.hemiI * (on ? 0.9 : this.dark ? 0.22 : 1);
     for (const l of rec.plights) {
-      l.intensity = l.userData.i * (on ? 0.25 : 1);
+      l.intensity = l.userData.i * (on ? 0.45 : this.dark ? 0.3 : 1);
       l.color.set(on ? 0x8a6cff : l.userData.c);
     }
-    this.renderer.toneMappingExposure = rec.exposure * (on ? 0.55 : 1);
-    this.uvLight.intensity = on ? 30 : 0;
+    this.renderer.toneMappingExposure = rec.exposure * (on ? 0.85 : this.dark ? 0.5 : 1);
+    this.uvLight.intensity = on ? 120 : 0;
+    this.camLight.intensity = this.dark && !on ? 30 : 0;
+    this.rebuildHotspots();
   }
+
+  // I3 — Lights Out challenge modifier: the room goes near-dark and only a
+  // small pool of light around the camera remains. Presentation only.
+  setDark(on) {
+    const changed = this.dark !== !!on;
+    this.dark = !!on;
+    if (changed) this._applyUV();
+  }
+
+  // I5 — atmosphere: a brief light flicker (frame() animates it, then the
+  // normal light state is restored). Never called during dialogue by design
+  // of the caller.
+  flicker() { this.flickerT = performance.now(); }
 
   setHotspots(list) {
     this.pending = list;
@@ -160,15 +217,46 @@ export class SceneView {
     while (hot.children.length) { const s = hot.children.pop(); s.material.dispose(); }
     this.hotspots = [];
     for (const h of this.pending || []) {
-      const mat = new THREE.SpriteMaterial({ map: this.tex[h.state] || this.tex.flavor, depthTest: false, depthWrite: false, transparent: true, opacity: h.state === "taken" ? 0.65 : 1 });
+      // UV layer: in UV mode a UV-flagged hotspot becomes an unmistakable
+      // fluorescent trace — white-hot core texture tinted by its state
+      // colour, half again as large, and pulsed in frame().
+      const glow = this.uv && !!h.uv;
+      const mat = new THREE.SpriteMaterial({
+        map: glow ? this.tex.uvglow : this.tex[h.state] || this.tex.flavor,
+        depthTest: false, depthWrite: false, transparent: true,
+        opacity: h.state === "taken" ? 0.65 : 1,
+        color: glow ? new THREE.Color(COLORS[h.state] || "#c9a7ff") : new THREE.Color(0xffffff)
+      });
       const sp = new THREE.Sprite(mat);
       sp.position.copy(b2t(h.pos));
       sp.renderOrder = 20;
-      const base = h.state === "new" ? 0.26 : h.state === "flavor" ? 0.16 : 0.2;
+      let base = h.state === "new" ? 0.26 : h.state === "flavor" ? 0.16 : 0.2;
+      if (glow) base *= 1.6;
       sp.scale.setScalar(base);
       hot.add(sp);
-      this.hotspots.push({ id: h.id, state: h.state, by: h.by, bpos: h.pos, pos: sp.position, sprite: sp, base, ph: Math.random() * 6 });
+      this.hotspots.push({ id: h.id, state: h.state, by: h.by, bpos: h.pos, pos: sp.position, sprite: sp, base, ph: Math.random() * 6, uvGlow: glow });
     }
+    this._buildKey();
+  }
+
+  // I1: (re)build the hidden-key sprite for the active scene. Called from
+  // rebuildHotspots (which wipes the hotspot group) and from setKey.
+  _buildKey() {
+    this.keyItem = null;
+    if (!this.active || !this.keyPos) return;
+    const mat = new THREE.SpriteMaterial({ map: this.tex.key, depthTest: false, depthWrite: false, transparent: true, opacity: 0.95 });
+    const sp = new THREE.Sprite(mat);
+    sp.position.copy(b2t(this.keyPos));
+    sp.renderOrder = 19;
+    sp.scale.setScalar(0.46);
+    this.active.hot.add(sp);
+    this.keyItem = { sprite: sp, base: 0.46, ph: Math.random() * 6 };
+  }
+
+  setKey(pos) {
+    const changed = JSON.stringify(pos || null) !== JSON.stringify(this.keyPos || null);
+    this.keyPos = pos || null;
+    if (changed) this._buildKey();
   }
 
   ping(bpos, color) {
@@ -238,6 +326,14 @@ export class SceneView {
 
   tap(cx, cy) {
     const r = this.canvas.getBoundingClientRect();
+    // I1: the hidden key gets first claim on a tap (it is small and precious).
+    if (this.keyItem) {
+      const v = new THREE.Vector3().copy(this.keyItem.sprite.position).project(this.camera);
+      if (v.z < 1) {
+        const sx = r.left + (v.x * 0.5 + 0.5) * r.width, sy = r.top + (-v.y * 0.5 + 0.5) * r.height;
+        if (Math.hypot(sx - cx, sy - cy) < 52) { this.onTap({ key: true }); return; }
+      }
+    }
     let best = null, bd = 44; // px; generous for fingers
     const v = new THREE.Vector3();
     for (const h of this.hotspots) {
@@ -286,9 +382,22 @@ export class SceneView {
     this.camera.position.set(o.target.x + o.radius * sp * Math.sin(o.theta), o.target.y + o.radius * Math.cos(o.phi), o.target.z + o.radius * sp * Math.cos(o.theta));
     this.camera.lookAt(o.target);
     if (this.uvLight) this.uvLight.position.copy(this.camera.position);
+    if (this.camLight) this.camLight.position.copy(this.camera.position);
+    if (this.flickerT) { // I5 flicker envelope (~650 ms of unstable light)
+      const rec = this.active, k = t - this.flickerT;
+      if (k < 650) rec.hemi.intensity = rec.hemiI * (this.uv ? 0.9 : this.dark ? 0.22 : 1) * (0.45 + 0.55 * Math.abs(Math.sin(k * 0.09) * Math.random()));
+      else { this.flickerT = 0; this._applyUV(); }
+    }
     const s = t / 1000;
+    if (this.keyItem) { // I1: a slow brass glint
+      this.keyItem.sprite.scale.setScalar(this.keyItem.base * (1 + 0.16 * Math.sin(s * 2.2 + this.keyItem.ph)));
+      this.keyItem.sprite.material.opacity = 0.8 + 0.2 * Math.sin(s * 2.2 + this.keyItem.ph);
+    }
     for (const h of this.hotspots) {
-      if (h.state === "new") h.sprite.scale.setScalar(h.base * (1 + 0.14 * Math.sin(s * 3 + h.ph)));
+      if (h.uvGlow) {
+        h.sprite.scale.setScalar(h.base * (1 + 0.24 * Math.sin(s * 4 + h.ph)));
+        h.sprite.material.opacity = (h.state === "taken" ? 0.6 : 0.82) + 0.18 * Math.sin(s * 4 + h.ph);
+      } else if (h.state === "new") h.sprite.scale.setScalar(h.base * (1 + 0.14 * Math.sin(s * 3 + h.ph)));
     }
     for (let i = this.pings.length - 1; i >= 0; i--) {
       const p = this.pings[i], k = (performance.now() - p.t0) / 2600;

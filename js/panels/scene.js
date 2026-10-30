@@ -4,6 +4,10 @@ import { ctx } from "../ctx.js";
 import { SceneView } from "../scene3d.js";
 import { sheet, toast } from "../sheets.js";
 
+// I10: chatter bed per ambience bed (location type). Wind gets none — a
+// research station's mast has no crowd to murmur.
+const CHATTER_FOR_BED = { rain: "station", hush: "hush", train: "train", water: "harbour", room: "murmur", wind: null };
+
 export function createScenePanel() {
   const canvas = h("canvas", { class: "scene-canvas", "aria-label": "3D location. Tap glowing markers to investigate." });
   const loading = h("div", { class: "loading hidden" }, "Loading location…");
@@ -48,6 +52,7 @@ export function createScenePanel() {
       quality: ctx.settings.quality, fps: ctx.settings.fps,
       onLoading: (on, name) => { loading.classList.toggle("hidden", !on); if (on) loading.textContent = "Loading " + name + "…"; },
       onTap: (hs) => {
+        if (hs.key) { ctx.send({ t: "key", scene: cur }); return; } // I1
         if (pingMode) { ctx.send({ t: "ping", scene: cur, pos: hs.pos }); setPing(false); return; }
         if (hs.state === "taken") { toast(`${hs.by || "A teammate"} already examined this. Ask them to share it.`); return; }
         ctx.send({ t: "inspect", id: hs.id });
@@ -63,14 +68,31 @@ export function createScenePanel() {
     const s = ctx.state;
     const sc = s.scenes.find((x) => x.id === id);
     if (!sc) return;
+    // R2: no UV layer in this case (Case 1) -> no UV button at all. If UV was
+    // somehow on, turn it off so the layer filter can't hide every hotspot.
+    const hasUV = !ctx.info.features || ctx.info.features.hasUV !== false;
+    uvBtn.classList.toggle("hidden", !hasUV);
+    if (!hasUV && uvMode) setUV(false);
     if (ctx.me() && ctx.me().scene !== id) ctx.send({ t: "scene", id });
     const amb = (ctx.info.features && ctx.info.features.ambience) || {};
     ctx.audio.setBed(amb[id] || null);
+    // I10: the chatter layer follows the location type (derived from its bed).
+    ctx.audio.setChatter(CHATTER_FOR_BED[amb[id]] || null);
     const v = ensureView();
     await v.show(sceneInfo(id));
     v.setHotspots(visHotspots(sc.hotspots));
+    applyKeys(s);
+    v.setDark((s.modifiers || []).includes("lightsout")); // I3
     lastKey = "";
     drawChips();
+  }
+
+  // I1: place (or clear) this scene's hidden brass key from the party state.
+  function applyKeys(s) {
+    if (!view || !s || !s.keys) return;
+    const pos = cur && s.keys.map[cur] && !s.keys.found.includes(cur) ? s.keys.map[cur] : null;
+    view.setKey(pos);
+    if (!uvMode && !pingMode) tip.textContent = pos ? "Drag to look · pinch to zoom · tap a marker — 🗝 a brass key hides somewhere here" : "Drag to look · pinch to zoom · tap a marker";
   }
 
   function drawChips() {
@@ -94,12 +116,37 @@ export function createScenePanel() {
     }
     if (!shown || !view) return;
     const sc = s.scenes.find((x) => x.id === cur);
+    applyKeys(s);
     const key = JSON.stringify(sc.hotspots.map((x) => [x.id, x.state])) + s.scenes.length + "|" + s.players.map((p) => p.scene).join() + "|uv" + uvMode;
     if (key !== lastKey) {
       lastKey = key;
       view.setHotspots(visHotspots(sc.hotspots));
       drawChips();
     }
+  }
+
+  // I5 — atmosphere events: rare, quiet, and never rude. A self-rescheduling
+  // timer fires every ~45–90 s; the beat is skipped while a voice line plays,
+  // while any sheet is open, outside the play phase, or in UV mode. Beats:
+  // a light flicker (+ tube hum), a distant door slam, a weather swell.
+  let atmoTimer = null;
+  function scheduleAtmo() {
+    clearTimeout(atmoTimer);
+    atmoTimer = setTimeout(fireAtmo, 45000 + Math.random() * 45000);
+  }
+  function fireAtmo() {
+    scheduleAtmo();
+    const s = ctx.state;
+    if (!shown || !s || s.phase !== "play" || uvMode) return;
+    if (ctx.audio.linePlaying()) return;
+    if (document.querySelector(".sheet-wrap, .overlay")) return;
+    const amb = (ctx.info.features && ctx.info.features.ambience) || {};
+    const bedHere = amb[cur];
+    const roll = Math.random();
+    if (roll < 0.4 && view) { view.flicker(); ctx.audio.sfx("flicker"); }
+    else if (roll < 0.7) ctx.audio.sfx("slam");
+    else if (bedHere === "rain" || bedHere === "water" || bedHere === "wind") ctx.audio.swellBed();
+    else if (view) { view.flicker(); ctx.audio.sfx("flicker"); }
   }
 
   ctx.on("msg:ping", (m) => {
@@ -123,7 +170,8 @@ export function createScenePanel() {
       view.start();
       if (ctx.state) select(cur || ctx.state.scenes[0].id);
       ctx.audio.setMood("explore");
+      scheduleAtmo();
     },
-    hide() { shown = false; if (view) view.stop(); setPing(false); ctx.audio.setBed(null); }
+    hide() { shown = false; if (view) view.stop(); setPing(false); ctx.audio.setBed(null); ctx.audio.setChatter(null); clearTimeout(atmoTimer); }
   };
 }

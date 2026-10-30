@@ -109,7 +109,11 @@ export function createBoardPanel() {
       strings.append(svg("path", { d, class: "string " + cls }));
       if (link) strings.append(svg("path", { d, class: "string-hit" }));
     };
-    for (const l of s.board.links) draw(l.a, l.b, l.proven ? "proven" : "quiet", l);
+    // I3 No Notes: established links stay hidden while the chapter is being
+    // played — the party works from memory; strings return at chapter end
+    // (report phase). Pending proposals are live actions and still draw.
+    const hideLinks = (s.modifiers || []).includes("nonotes") && s.phase === "play";
+    for (const l of s.board.links) { if (!hideLinks) draw(l.a, l.b, l.proven ? "proven" : "quiet", l); }
     for (const p of s.proposals.links) draw(p.a, p.b, "pending");
     for (const id of cardEls.keys()) { const A = center(id); if (A) strings.append(svg("circle", { cx: A.x, cy: A.y - CH / 2 + 6, r: 4, class: "pin" })); }
   }
@@ -141,7 +145,12 @@ export function createBoardPanel() {
       toolbar.append(
         h("button", { class: "btn small" + (linkMode ? "" : " ghost"), "aria-pressed": linkMode ? "true" : "false", onclick: () => { linkMode = !linkMode; picked = null; update(ctx.state); } }, linkMode ? "🔗 Linking: tap two items" : "🔗 Link items"),
         h("button", { class: "btn small ghost", onclick: noteSheet }, "📝 Note"));
-      if (s.chapter.last && s.phase === "play" && !s.proposals.accuse) toolbar.append(h("button", { class: "btn small accuse", onclick: accuseSheet }, "🎯 Accuse"));
+      if ((s.modifiers || []).includes("nonotes") && s.phase === "play") toolbar.append(h("span", { class: "mod-flag" }, "🙈 No Notes — links return at chapter end"));
+      // I9: from chapter 2 onward the Accuse button is available; before the
+      // final chapter it is the early gamble (labelled as such).
+      if (s.phase === "play" && !s.proposals.accuse && (s.chapter.last || s.chapter.index >= 1)) {
+        toolbar.append(h("button", { class: "btn small accuse", onclick: accuseSheet }, s.chapter.last ? "🎯 Accuse" : "🎯 Accuse early (+1★ gamble)"));
+      }
     }
   }
 
@@ -207,7 +216,7 @@ export function createBoardPanel() {
       const voted = voters.filter((p) => p.id in ac.votes).length;
       const mine = s.you in ac.votes;
       banners.append(h("div", { class: "banner accuse" },
-        h("p", {}, h("strong", {}, "Vote: "), by ? by.name : "A teammate", " wants to accuse ", h("strong", {}, who.name), helper ? [" , helped by ", h("strong", {}, helper.name)] : null, ". ", h("small", {}, `${voted}/${voters.length} voted`)),
+        h("p", {}, h("strong", {}, "Vote: "), by ? by.name : "A teammate", " wants to accuse ", h("strong", {}, who.name), helper ? [" , helped by ", h("strong", {}, helper.name)] : null, ac.early ? " — EARLY gamble (+1★ if right, double cost if wrong)" : "", ". ", h("small", {}, `${voted}/${voters.length} voted`)),
         mine ? h("div", { class: "row" }, h("small", {}, ac.votes[s.you] ? "You voted yes." : "You voted no."),
           ac.by === s.you || s.host === s.you ? h("button", { class: "btn ghost small", onclick: () => ctx.send({ t: "accuse_cancel" }) }, "Cancel") : null)
           : h("div", { class: "row" }, h("button", { class: "btn small", onclick: () => ctx.send({ t: "accuse_vote", ok: true }) }, "Yes, accuse"), h("button", { class: "btn ghost small", onclick: () => ctx.send({ t: "accuse_vote", ok: false }) }, "No, not yet"))));
@@ -235,8 +244,10 @@ export function createBoardPanel() {
       };
       const go = h("button", { class: "btn accuse", disabled: true, onclick: () => { ctx.send({ t: "accuse", sel: pick }); sh.close(); } }, "Put it to a vote");
       const check = () => { go.disabled = !(pick.culprit && pick.motive && pick.method && pick.proof && (!hasAcc || pick.accomplice)); };
+      const early = !s0.chapter.last;
       const groups = [
         h("p", { class: "muted" }, hasAcc ? "Everyone in the party votes. This case needs all five parts right — culprit, accomplice, motive, method and proof — or the accusation fails." : "Everyone in the party votes. A wrong accusation costs stars, so be sure."),
+        ...(early ? [h("p", { class: "gamble-note" }, "⏱ EARLY ACCUSATION — the gamble: if you're right, the party earns +1 bonus star. If you're wrong, reopening the case costs DOUBLE. Waiting for the final chapter is the safe play.")] : []),
         group("Who did it?", A.culprits.map((id) => ({ id })), "culprit", (it) => ctx.suspectInfo(it.id).name)
       ];
       if (hasAcc) groups.push(group("Who helped them?", A.accomplices.map((id) => ({ id })), "accomplice", (it) => ctx.suspectInfo(it.id).name));

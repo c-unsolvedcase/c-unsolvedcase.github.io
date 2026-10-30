@@ -19,6 +19,32 @@ function ensure() {
   return ac;
 }
 
+// I2 — heartbeat: a low lub-dub under a confrontation. All thumps are
+// scheduled up-front with gain envelopes (no timers), so the same code path
+// renders offline for the sample harness. Volume is modest by design: it is
+// tension under the dialogue, not a jump scare.
+let hbNodes = [];
+function thump(at, vol) {
+  if (!ac || !sfxGain) return;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = "sine";
+  o.frequency.setValueAtTime(62, at);
+  o.frequency.exponentialRampToValueAtTime(38, at + 0.11);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(vol, at + 0.018);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.17);
+  o.connect(g); g.connect(sfxGain);
+  o.start(at); o.stop(at + 0.22);
+  hbNodes.push(o);
+}
+function stopHeartbeat() { for (const o of hbNodes) { try { o.stop(); } catch {} } hbNodes = []; }
+function scheduleHeartbeat(seconds, vol = 0.3) {
+  if (!ac) return;
+  stopHeartbeat();
+  const t0 = ac.currentTime + 0.03, period = 0.84;
+  for (let t = t0; t < t0 + seconds; t += period) { thump(t, vol); thump(t + 0.17, vol * 0.7); }
+}
+
 export const audio = {
   unlock() {
     const a = ensure();
@@ -26,6 +52,7 @@ export const audio = {
     if (!started && a) { started = true; buildAmbience(); }
     this.applyVolume();
     if (pendingBed) { const p = pendingBed; pendingBed = null; this.setBed(p); }
+    if (pendingChatter) { const p = pendingChatter; pendingChatter = null; this.setChatter(p); }
   },
 
   // Location ambience: a procedural WebAudio bed per scene (rain, wind,
@@ -38,6 +65,17 @@ export const audio = {
     if (bed) { bed.stop(); bed = null; }
     if (id) bed = buildBed(id);
   },
+
+  // I10: the chatter layer follows the scene like the bed does.
+  setChatter(kind) {
+    if (!ac) { pendingChatter = kind; return; }
+    if (chatter && chatter.id === kind) return;
+    if (chatter) { chatter.stop(); chatter = null; }
+    if (kind) chatter = buildChatter(kind);
+  },
+
+  // I5: rain/wind swell (no-op for beds without weather).
+  swellBed() { if (bed && bed.swell) bed.swell(); },
 
   // The composed mood ambience (drone/wash/notes) sits on its own bus under
   // the ambience gain, so location beds can be auditioned on their own (used
@@ -93,6 +131,14 @@ export const audio = {
     this.applyVolume();
   },
 
+  // I2: sustained heartbeat for a confrontation beat (~8 s by default).
+  heartbeat(durMs = 8000) {
+    if (!ac || ac.state !== "running" || !ctx.settings.music) return;
+    scheduleHeartbeat(Math.max(1, durMs / 1000), 0.3);
+  },
+  stopHeartbeat() { stopHeartbeat(); },
+  linePlaying() { return !!line; }, // I5 guard: atmosphere events never overlap dialogue
+
   sfx(name) {
     if (!ac || ac.state !== "running" || !ctx.settings.music) return;
     const t = ac.currentTime;
@@ -118,6 +164,25 @@ export const audio = {
       // Conclusion sting: a board link just proved a conclusion — a short
       // minor-key figure, plus a softer variant for chapter completion.
       case "sting": [220, 261.63, 311.13, 440].forEach((f, i) => blip(f, i * 0.09, 1.1, "triangle", 0.2)); blip(110, 0, 1.3, "sine", 0.12); break;
+      case "heartbeat": scheduleHeartbeat(2.6, 0.3); break; // I2 sample/short form
+      // I5 one-shots. Slam: a distant door — low thump + muffled noise burst
+      // + a fainter repeat as the corridor answers.
+      case "slam": {
+        const th = (at, vol) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = "sine"; o.frequency.setValueAtTime(96, t + at); o.frequency.exponentialRampToValueAtTime(46, t + at + 0.16); g.gain.setValueAtTime(0.0001, t + at); g.gain.exponentialRampToValueAtTime(vol, t + at + 0.014); g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.34); o.connect(g); g.connect(sfxGain); o.start(t + at); o.stop(t + at + 0.4); };
+        th(0, 0.5); th(0.38, 0.16);
+        blip(240, 0, 0.1, "sawtooth", 0.05);
+        break;
+      }
+      // Flicker hum: a sick fluorescent tube buzzing for ~0.7 s.
+      case "flicker": {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.type = "square"; o.frequency.value = 118;
+        g.gain.setValueAtTime(0.0001, t);
+        [0.05, 0.1, 0.07, 0.16, 0.05, 0.12, 0.05].reduce((acc2, d2) => { g.gain.exponentialRampToValueAtTime(0.085, acc2 + 0.008); g.gain.exponentialRampToValueAtTime(0.01, acc2 + d2); return acc2 + d2; }, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
+        o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t + 0.8);
+        break;
+      }
       case "sting_chapter": [330, 392, 494].forEach((f, i) => blip(f, i * 0.12, 0.9, "sine", 0.13)); break;
       default: blip(700, 0, 0.08);
     }
@@ -237,9 +302,99 @@ function buildBed(id) {
 
   return {
     id,
+    swell() { // I5: a rain/wind swell — the bed breathes louder, then settles
+      const t = ac.currentTime;
+      out.gain.cancelScheduledValues(t);
+      out.gain.setTargetAtTime(1.7, t, 0.6);
+      out.gain.setTargetAtTime(0.9, t + 2.4, 1.4);
+    },
     stop() {
       out.gain.setTargetAtTime(0, ac.currentTime, 0.25);
       for (const t of timers) clearInterval(t);
+      setTimeout(() => { for (const n of nodes) { try { n.stop && n.stop(); } catch {} try { n.disconnect(); } catch {} } try { out.disconnect(); } catch {} }, 700);
+    }
+  };
+}
+
+// I10 — radio chatter: a second, fainter layer UNDER the location bed —
+// unintelligible human murmur (or harbour texture for Case 1). It is pure
+// texture: formant-ish filtered noise and muffled "voices" with syllabic
+// gating, deliberately content-free. Routed through ambGain, so the music
+// toggle, volume and voice ducking all apply exactly as for the bed. Every
+// source is loop/LFO driven — no timers — so it renders offline too.
+let chatter = null, pendingChatter = null;
+
+function buildChatter(kind) {
+  const out = ac.createGain();
+  out.gain.value = 0;
+  out.connect(ambGain);
+  const nodes = [];
+  const gain = (v) => { const g = ac.createGain(); g.gain.value = v; nodes.push(g); return g; };
+  const filt = (type, freq, q) => { const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; if (q) f.Q.value = q; nodes.push(f); return f; };
+  const lfo = (freq, target, depth) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = freq; g.gain.value = depth; o.connect(g); g.connect(target); o.start(); nodes.push(o, g); };
+  // one muffled "voice": a low sawtooth through a tight lowpass, gated by a
+  // slow square-ish LFO so it murmurs in syllable-like bursts.
+  const voice = (base, syllHz, vol, pan) => {
+    const o = ac.createOscillator(); o.type = "sawtooth"; o.frequency.value = base;
+    const vib = ac.createOscillator(), vg = ac.createGain(); vib.frequency.value = 5.1; vg.gain.value = base * 0.012; vib.connect(vg); vg.connect(o.frequency); vib.start();
+    const lp = filt("lowpass", 320, 0.7);
+    const gate = gain(0);
+    const sq = ac.createOscillator(), sg = ac.createGain(); sq.type = "square"; sq.frequency.value = syllHz; sg.gain.value = vol * 0.5; sq.connect(sg); sg.connect(gate.gain); sq.start();
+    gate.gain.value = vol * 0.5;
+    let tail = gate;
+    if (pan !== undefined && ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = pan; nodes.push(p); gate.connect(p); tail = p; }
+    o.connect(lp); lp.connect(gate); tail.connect(out); o.start();
+    nodes.push(o, vib, vg, sq, sg);
+  };
+  const crowd = (vol) => { // breathy crowd wash underneath the voices
+    const s = ac.createBufferSource(); s.buffer = noiseBuffer(3, false); s.loop = true;
+    const bp = filt("bandpass", 500, 0.5), g = gain(vol);
+    lfo(0.09, bp.frequency, 120);
+    s.connect(bp); bp.connect(g); g.connect(out); s.start(); nodes.push(s);
+  };
+  const level = (v) => out.gain.setTargetAtTime(v, ac.currentTime, 0.8);
+
+  if (kind === "murmur") {          // hotel lobby / busy room
+    level(0.22); crowd(0.5);
+    voice(104, 3.1, 0.5, -0.4); voice(131, 2.6, 0.42, 0.35); voice(92, 3.7, 0.36, 0.05);
+  } else if (kind === "station") {  // station hall: broader, echoing
+    level(0.24); crowd(0.75);
+    voice(98, 2.9, 0.5, -0.5); voice(124, 2.4, 0.45, 0.5); voice(146, 3.3, 0.3, 0);
+    const s = ac.createBufferSource(); s.buffer = noiseBuffer(2, false); s.loop = true;
+    const bp = filt("bandpass", 950, 0.8), g = gain(0.12); lfo(0.05, g.gain, 0.07);
+    s.connect(bp); bp.connect(g); g.connect(out); s.start(); nodes.push(s);
+  } else if (kind === "hush") {     // theatre / museum: barely-there whispers
+    level(0.19); crowd(0.38);
+    voice(118, 2.2, 0.48, -0.3); voice(96, 1.9, 0.38, 0.4);
+  } else if (kind === "train") {    // compartment murmur with the sway
+    level(0.19); crowd(0.5);
+    voice(108, 2.8, 0.5, -0.35); voice(138, 2.5, 0.42, 0.3);
+    lfo(0.45, out.gain, 0.03);
+  } else if (kind === "harbour") {  // Case 1: gulls + wireless crackle, baked into a loop
+    level(0.55);
+    const sr = ac.sampleRate, len = sr * 8, buf = ac.createBuffer(1, len, sr), d = buf.getChannelData(0);
+    let seed = 1234567; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let c = 0; c < 6; c++) { // gull cries: falling chirps with a tremolo
+      const at = Math.floor(rnd() * (len - sr)), f0 = 2100 + rnd() * 700, dur = Math.floor(sr * (0.16 + rnd() * 0.12));
+      for (let i = 0; i < dur; i++) {
+        const k = i / dur, f = f0 * (1 - 0.32 * k);
+        d[at + i] += Math.sin(2 * Math.PI * f * (i / sr)) * 0.3 * Math.sin(Math.PI * k) * (0.7 + 0.3 * Math.sin(2 * Math.PI * 31 * (i / sr)));
+      }
+    }
+    for (let c = 0; c < 260; c++) { // wireless crackle: sparse static ticks
+      const at = Math.floor(rnd() * (len - 400)), n = 40 + Math.floor(rnd() * 160);
+      for (let i = 0; i < n; i++) d[at + i] += (rnd() * 2 - 1) * 0.09 * (1 - i / n);
+    }
+    const s = ac.createBufferSource(); s.buffer = buf; s.loop = true;
+    const hp = filt("highpass", 900), g = gain(0.8);
+    s.connect(hp); hp.connect(g); g.connect(out); s.start(); nodes.push(s);
+  } else {
+    return null;
+  }
+  return {
+    id: kind,
+    stop() {
+      out.gain.setTargetAtTime(0, ac.currentTime, 0.25);
       setTimeout(() => { for (const n of nodes) { try { n.stop && n.stop(); } catch {} try { n.disconnect(); } catch {} } try { out.disconnect(); } catch {} }, 700);
     }
   };

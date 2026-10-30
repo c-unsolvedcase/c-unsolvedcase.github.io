@@ -162,3 +162,27 @@ input:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px soli
 .bench-cand canvas{border-radius:5px;max-width:26vw;height:auto}
 .bench-cand.on{border-color:var(--acc)}
 .bench-cand small{color:var(--mut)}
+
+/* ---- Round 2 ---- */
+.gamble-note{border:1px solid #b98a2f;background:rgba(185,138,47,.12);border-radius:10px;padding:.55em .7em;color:#e8c87a}
+.bubble.them.confront{border-color:#8e2f35;background:linear-gradient(180deg,rgba(142,47,53,.20),rgba(142,47,53,.05));box-shadow:0 0 0 1px rgba(142,47,53,.35), 0 6px 18px rgba(0,0,0,.35)}
+.bubble.them.confront small{color:#ff9d97;letter-spacing:.04em}
+.suspect-head.shaken{animation:uc-shake .5s ease-in-out 3;filter:brightness(.82) saturate(.85)}
+@keyframes uc-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-3px) rotate(-.4deg)}45%{transform:translateX(3px)}70%{transform:translateX(-2px) rotate(.3deg)}}
+.quick-bar{display:flex;gap:.4em;flex-wrap:wrap;padding:.45em .2em}
+.quick-chip{font-size:.82em;border-color:#4a3d1c;color:#e8c87a}
+.msg.quick .text{color:#e8c87a;font-weight:600}
+.daily-box h3{margin:.1em 0 .5em}
+.daily-choice{width:100%;text-align:left}
+.daily-chips{margin-top:.55em;gap:.45em;flex-wrap:wrap}
+.daily-chip{background:#171724;border:1px solid var(--line);border-radius:999px;padding:.28em .7em;font-size:.85em}
+.daily-chip.collector{border-color:#b98a2f;color:#e8c87a}
+.case-pb{color:#9fd0a8;font-size:.92em}
+.mod-choice{text-align:left}
+.run-timer{font-variant-numeric:tabular-nums;background:#171724;border:1px solid #4a3d1c;color:#e8c87a;border-radius:999px;padding:.3em .7em;font-weight:600;white-space:nowrap}
+.mod-flag{color:#e8c87a;font-size:.85em;align-self:center}
+.modified-note{color:#e8c87a;text-align:center;border:1px solid #4a3d1c;background:rgba(185,138,47,.10);border-radius:10px;padding:.5em .7em}
+.rank-line{display:flex;align-items:center;gap:.5em;justify-content:center;padding:.35em 0 0}
+.prologue-panels{display:flex;gap:.45em;margin:.4em 0 .6em}
+.prologue-panel{flex:1;min-width:0;aspect-ratio:3/4.1;object-fit:cover;border-radius:8px;border:1px solid var(--line);opacity:.45;filter:saturate(.8);transition:opacity .4s, transform .4s}
+.prologue-panel.on{opacity:1;filter:none;transform:scale(1.03);border-color:#b98a2f}

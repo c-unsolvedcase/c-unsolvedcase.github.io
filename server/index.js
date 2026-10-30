@@ -111,11 +111,15 @@ function createServer(opts = {}) {
   function featuresOf(C) {
     const ov = OVERLAYS[C.id] || {};
     const f = { ambience: ov.ambience || {} };
+    // Round 2 (R2): the client hides its UV button on cases with no UV layer
+    // (Case 1's frozen data has none — a dead button invited fruitless hunts).
+    f.hasUV = C.scenes.some((s) => (s.hotspots || []).some((hh) => hh.uv));
     if (ov.coldOpen) {
       f.coldOpen = {
         scene: ov.coldOpen.scene, title: ov.coldOpen.title,
         beats: ov.coldOpen.beats.map((b) => ({ speaker: b.speaker, text: b.text, audio: voiceKey(b.speaker, b.text) })),
-        spots: ov.coldOpen.spots
+        spots: ov.coldOpen.spots,
+        panels: ov.coldOpen.panels || null // I7 comic-panel intros
       };
     }
     return f;
@@ -141,7 +145,7 @@ function createServer(opts = {}) {
     for (const p of room.connected()) send(sockFor(room, p.id), { t: "state", s: room.view(p.id) });
   }
   // messages that never change the shared state: no full state push for these
-  const LIGHT = new Set(["bm", "nm", "ping", "emote", "react", "chat", "rtc", "rtc_join", "rtc_leave", "iv_suggest", "report", "pong", "lab_probe", "ping_alive"]);
+  const LIGHT = new Set(["bm", "nm", "ping", "emote", "react", "chat", "quick", "rtc", "rtc_join", "rtc_leave", "iv_suggest", "report", "pong", "lab_probe", "ping_alive"]);
 
   // ------------------------------------------------------------ http
   function serveStatic(req, res) {
@@ -242,6 +246,10 @@ function createServer(opts = {}) {
       if (rooms.size > 500) return send(ws, { t: "err", msg: "The server is busy, try again soon.", fatal: true });
       const code = newCode();
       room = new Room(C, code, m.difficulty);
+      // I3: challenge modifiers, opt-in at creation (the client only offers
+      // them for already-solved cases; the server just whitelists + records).
+      const MODS = ["lightsout", "nonotes", "speedrun"];
+      if (Array.isArray(m.modifiers)) room.modifiers = [...new Set(m.modifiers.filter((x) => MODS.includes(x)))].slice(0, 3);
       rooms.set(code, room);
     } else {
       const code = String(m.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
@@ -258,7 +266,9 @@ function createServer(opts = {}) {
     conns.set(key, ws);
     ctx.pid = p.id;
     ctx.room = room;
-    send(ws, { t: "welcome", pid: p.id, token: p.token, code: room.code, info: caseInfo(C), ice: iceServers, backlog: room.backlog(p.id) });
+    // info must describe the ROOM's case — a join hello carries no caseId,
+    // so caseInfo(C) would ship Case 1's data to joiners of every other case.
+    send(ws, { t: "welcome", pid: p.id, token: p.token, code: room.code, info: caseInfo(room.C), ice: iceServers, backlog: room.backlog(p.id) });
     flush(room);
     pushState(room);
     dirty = true;
@@ -295,6 +305,8 @@ function createServer(opts = {}) {
       case "retry": return room.retry(pid);
       case "restart": return room.restart(pid);
       case "chat": return room.chat(pid, m.text);
+      case "quick": return room.quick(pid, m.idx | 0);
+      case "key": return room.collectKey(pid, String(m.scene));
       case "emote": return room.emote(pid, m.e);
       case "react": return room.react(pid, String(m.card), String(m.e));
       case "ping": return room.ping(pid, String(m.scene), m.pos);

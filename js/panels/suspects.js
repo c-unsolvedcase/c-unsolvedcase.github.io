@@ -39,7 +39,11 @@ export function createSuspectsPanel() {
     clear(el);
     const can = s.iCanInterrogate;
     el.append(h("button", { class: "btn ghost small back", onclick: () => { sel = null; update(ctx.state); } }, "← All suspects"));
-    el.append(h("div", { class: "suspect-head" }, avatar(sel, info.color, 92, st.pressure),
+    // I2: for a few seconds after a confrontation lands, the suspect's frame
+    // shakes and darkens (the log entry carries the confront flag + time).
+    const lastLog = st.log[st.log.length - 1];
+    const shaken = !!(lastLog && lastLog.confront && Date.now() - (lastLog.t || 0) < 9000);
+    el.append(h("div", { class: "suspect-head" + (shaken ? " shaken" : "") }, avatar(sel, info.color, 92, st.pressure),
       h("div", { class: "grow" }, h("h2", {}, info.name, h("small", {}, ", ", info.age)), h("p", { class: "muted" }, info.role), h("p", { class: "bio" }, info.bio))));
     el.append(h("div", { class: "meters" }, meter("Pressure", st.pressure, "pressure"), meter("Trust", st.trust, "trust")));
 
@@ -48,7 +52,7 @@ export function createSuspectsPanel() {
     for (const e of st.log) {
       const q = e.type === "ask" ? e.label : "Shows: " + e.cardTitle;
       log.append(h("div", { class: "bubble me" }, e.repeat ? h("small", {}, "again") : null, q));
-      log.append(h("div", { class: "bubble them" }, h("p", {}, "“", e.text, "”"), lineBtn(e.audio, e.text, sel)));
+      log.append(h("div", { class: "bubble them" + (e.confront ? " confront" : "") }, e.confront ? h("small", {}, e.confront === "confess" ? "💔 the lie breaks" : "⚠ caught out") : null, h("p", {}, "“", e.text, "”"), lineBtn(e.audio, e.text, sel)));
     }
     el.append(log);
     if (wasBottom) setTimeout(() => (log.scrollTop = log.scrollHeight), 0); else log.scrollTop = top;
