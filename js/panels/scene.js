@@ -10,10 +10,28 @@ export function createScenePanel() {
   const chips = h("div", { class: "scene-chips" });
   const roleBadge = h("div", { class: "role-badge" });
   const pingBtn = h("button", { class: "btn small ghost ping-btn", "aria-pressed": "false", onclick: () => setPing(!pingMode) }, "📍 Ping");
+  const uvBtn = h("button", { class: "btn small ghost uv-btn", "aria-pressed": "false", "aria-label": "UV light", onclick: () => setUV(!uvMode) }, "🔦 UV");
   const tip = h("div", { class: "scene-tip" }, "Drag to look · pinch to zoom · tap a marker");
-  const el = h("div", { class: "panel scene-panel" }, canvas, chips, roleBadge, pingBtn, tip, loading);
+  const el = h("div", { class: "panel scene-panel" }, canvas, chips, roleBadge, pingBtn, uvBtn, tip, loading);
 
-  let view = null, cur = null, shown = false, pingMode = false, lastKey = "";
+  let view = null, cur = null, shown = false, pingMode = false, uvMode = false, lastKey = "";
+
+  // UV mode shows only UV-layer hotspots; normal mode hides them. Anyone may
+  // toggle — solo players hold every role, so no find is ever gated by it.
+  const visHotspots = (list) => list.filter((x) => (uvMode ? !!x.uv : !x.uv));
+
+  function setUV(on) {
+    uvMode = on;
+    uvBtn.classList.toggle("on", on);
+    uvBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    tip.textContent = on ? "UV light: some traces only show in the dark" : "Drag to look · pinch to zoom · tap a marker";
+    if (view) view.setUV(on);
+    lastKey = "";
+    if (ctx.state && cur) {
+      const sc = ctx.state.scenes.find((x) => x.id === cur);
+      if (sc && view) view.setHotspots(visHotspots(sc.hotspots));
+    }
+  }
 
   const sceneInfo = (id) => ctx.info.scenes.find((s) => s.id === id);
 
@@ -46,9 +64,11 @@ export function createScenePanel() {
     const sc = s.scenes.find((x) => x.id === id);
     if (!sc) return;
     if (ctx.me() && ctx.me().scene !== id) ctx.send({ t: "scene", id });
+    const amb = (ctx.info.features && ctx.info.features.ambience) || {};
+    ctx.audio.setBed(amb[id] || null);
     const v = ensureView();
     await v.show(sceneInfo(id));
-    v.setHotspots(sc.hotspots);
+    v.setHotspots(visHotspots(sc.hotspots));
     lastKey = "";
     drawChips();
   }
@@ -74,10 +94,10 @@ export function createScenePanel() {
     }
     if (!shown || !view) return;
     const sc = s.scenes.find((x) => x.id === cur);
-    const key = JSON.stringify(sc.hotspots.map((x) => [x.id, x.state])) + s.scenes.length + "|" + s.players.map((p) => p.scene).join();
+    const key = JSON.stringify(sc.hotspots.map((x) => [x.id, x.state])) + s.scenes.length + "|" + s.players.map((p) => p.scene).join() + "|uv" + uvMode;
     if (key !== lastKey) {
       lastKey = key;
-      view.setHotspots(sc.hotspots);
+      view.setHotspots(visHotspots(sc.hotspots));
       drawChips();
     }
   }
@@ -104,6 +124,6 @@ export function createScenePanel() {
       if (ctx.state) select(cur || ctx.state.scenes[0].id);
       ctx.audio.setMood("explore");
     },
-    hide() { shown = false; if (view) view.stop(); setPing(false); }
+    hide() { shown = false; if (view) view.stop(); setPing(false); ctx.audio.setBed(null); }
   };
 }

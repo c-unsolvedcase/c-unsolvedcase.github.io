@@ -14,10 +14,11 @@ export function createBoardPanel() {
   const strings = svg("svg", { class: "strings", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
   cork.append(strings);
   const scroller = h("div", { class: "board-scroll" }, cork);
-  const el = h("div", { class: "panel board-panel" }, toolbar, banners, scroller);
+  const tlEl = h("div", { class: "timeline hidden" });
+  const el = h("div", { class: "panel board-panel" }, toolbar, banners, scroller, tlEl);
 
   const cardEls = new Map(), noteEls = new Map(), pos = {}, notePos = {};
-  let linkMode = false, picked = null, dragId = null, seenLinks = null;
+  let linkMode = false, picked = null, dragId = null, seenLinks = null, viewMode = "board";
 
   // ------------------------------------------------------------ drag
   function draggable(node, id, kind, onTap) {
@@ -67,6 +68,7 @@ export function createBoardPanel() {
       n.className = "bcard " + c.type + (picked === c.id ? " picked" : "") + (c.lab && !c.lab.done ? " needs-lab" : "");
       clear(n).append(h("span", { class: "ico" }, cardIcon(c)), h("span", { class: "t" }, c.title));
       if (c.lab && !c.lab.done) n.append(h("span", { class: "tag" }, "🔬"));
+      n.append(h("button", { class: "react-btn", "aria-label": "React to " + c.title, onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); reactSheet(c); } }, "🙂"));
       if (dragId !== c.id) {
         const sp = s.board.pos[c.id];
         pos[c.id] = sp ? { x: sp.x * W, y: sp.y * H } : defaultPos(i);
@@ -133,10 +135,58 @@ export function createBoardPanel() {
   function drawToolbar(s) {
     clear(toolbar);
     toolbar.append(
-      h("button", { class: "btn small" + (linkMode ? "" : " ghost"), "aria-pressed": linkMode ? "true" : "false", onclick: () => { linkMode = !linkMode; picked = null; update(ctx.state); } }, linkMode ? "🔗 Linking: tap two items" : "🔗 Link items"),
-      h("button", { class: "btn small ghost", onclick: noteSheet }, "📝 Note"));
-    if (s.chapter.last && s.phase === "play" && !s.proposals.accuse) toolbar.append(h("button", { class: "btn small accuse", onclick: accuseSheet }, "🎯 Accuse"));
+      h("button", { class: "btn small" + (viewMode === "board" ? "" : " ghost"), "aria-pressed": viewMode === "board" ? "true" : "false", onclick: () => { viewMode = "board"; update(ctx.state); } }, "📌 Board"),
+      h("button", { class: "btn small" + (viewMode === "timeline" ? "" : " ghost"), "aria-pressed": viewMode === "timeline" ? "true" : "false", onclick: () => { viewMode = "timeline"; update(ctx.state); } }, "🕰 Timeline"));
+    if (viewMode === "board") {
+      toolbar.append(
+        h("button", { class: "btn small" + (linkMode ? "" : " ghost"), "aria-pressed": linkMode ? "true" : "false", onclick: () => { linkMode = !linkMode; picked = null; update(ctx.state); } }, linkMode ? "🔗 Linking: tap two items" : "🔗 Link items"),
+        h("button", { class: "btn small ghost", onclick: noteSheet }, "📝 Note"));
+      if (s.chapter.last && s.phase === "play" && !s.proposals.accuse) toolbar.append(h("button", { class: "btn small accuse", onclick: accuseSheet }, "🎯 Accuse"));
+    }
   }
+
+  // The Timeline view: the night's events, placed as the party earns them.
+  // The server only sends steps whose evidence card has been earned, so this
+  // can never run ahead of the investigation.
+  function drawTimeline(s) {
+    clear(tlEl);
+    const steps = s.timeline || [];
+    if (!steps.length) {
+      tlEl.append(h("p", { class: "muted tl-empty" }, "Nothing on the timeline yet. Earn conclusions and testimony, and the night will piece itself together here."));
+      return;
+    }
+    for (const st of steps) {
+      const sceneName = (ctx.info.scenes.find((x) => x.id === st.scene) || {}).name || "";
+      tlEl.append(h("div", { class: "tl-step" },
+        h("span", { class: "tl-time" }, st.time),
+        h("div", { class: "tl-body" }, h("strong", {}, st.title),
+          h("small", {}, [st.actor, sceneName].filter(Boolean).join(" · ")),
+          h("p", {}, st.text))));
+    }
+  }
+
+  // Board reactions: stamp an emoji on a card; the server relays it to the
+  // room as an ephemeral event (no state, no scoring).
+  function reactSheet(c) {
+    const sh = sheet({ title: "React", render: (b) => b.append(
+      h("p", { class: "muted" }, "Stamp “" + c.title + "” for the whole party:"),
+      h("div", { class: "row center react-row" }, ["😲", "🤔", "🎯", "🔍"].map((e) =>
+        h("button", { class: "emo react-pick", "aria-label": "React " + e, onclick: () => { ctx.send({ t: "react", card: c.id, e }); sh.close(); } }, e)))) });
+  }
+
+  ctx.on("msg:react", (m) => {
+    const p = ctx.player(m.pid);
+    const n = cardEls.get(m.card);
+    if (n) {
+      const st = h("span", { class: "stamp", "aria-hidden": "true" }, m.e);
+      n.append(st);
+      setTimeout(() => st.remove(), 2600);
+    }
+    if (p && ctx.state && m.pid !== ctx.state.you) {
+      const c = ctx.card(m.card);
+      toast(`${p.name} reacted ${m.e} to “${c ? c.title : "a card"}”`, "", 2200);
+    }
+  });
 
   function drawBanners(s) {
     clear(banners);
@@ -152,11 +202,12 @@ export function createBoardPanel() {
     const ac = s.proposals.accuse;
     if (ac) {
       const who = ctx.suspectInfo(ac.sel.culprit), by = ctx.player(ac.by);
+      const helper = ac.sel.accomplice ? ctx.suspectInfo(ac.sel.accomplice) : null;
       const voters = s.players.filter((p) => p.connected);
       const voted = voters.filter((p) => p.id in ac.votes).length;
       const mine = s.you in ac.votes;
       banners.append(h("div", { class: "banner accuse" },
-        h("p", {}, h("strong", {}, "Vote: "), by ? by.name : "A teammate", " wants to accuse ", h("strong", {}, who.name), ". ", h("small", {}, `${voted}/${voters.length} voted`)),
+        h("p", {}, h("strong", {}, "Vote: "), by ? by.name : "A teammate", " wants to accuse ", h("strong", {}, who.name), helper ? [" , helped by ", h("strong", {}, helper.name)] : null, ". ", h("small", {}, `${voted}/${voters.length} voted`)),
         mine ? h("div", { class: "row" }, h("small", {}, ac.votes[s.you] ? "You voted yes." : "You voted no."),
           ac.by === s.you || s.host === s.you ? h("button", { class: "btn ghost small", onclick: () => ctx.send({ t: "accuse_cancel" }) }, "Cancel") : null)
           : h("div", { class: "row" }, h("button", { class: "btn small", onclick: () => ctx.send({ t: "accuse_vote", ok: true }) }, "Yes, accuse"), h("button", { class: "btn ghost small", onclick: () => ctx.send({ t: "accuse_vote", ok: false }) }, "No, not yet"))));
@@ -171,8 +222,10 @@ export function createBoardPanel() {
   function accuseSheet() {
     const s0 = ctx.state;
     const concl = s0.cards.filter((c) => c.type === "conclusion");
-    const pick = { culprit: null, motive: null, method: null, proof: null };
     const A = ctx.info.accusation;
+    const hasAcc = Array.isArray(A.accomplices) && A.accomplices.length > 0;
+    const pick = { culprit: null, motive: null, method: null, proof: null };
+    if (hasAcc) pick.accomplice = null;
     const sh = sheet({ title: "Make your accusation", wide: true, render: (b) => {
       if (!concl.length) { b.append(h("p", { class: "muted" }, "You haven't proven anything on the board yet. Link evidence first.")); return; }
       const group = (title, items, key, label) => {
@@ -181,14 +234,18 @@ export function createBoardPanel() {
         return box;
       };
       const go = h("button", { class: "btn accuse", disabled: true, onclick: () => { ctx.send({ t: "accuse", sel: pick }); sh.close(); } }, "Put it to a vote");
-      const check = () => { go.disabled = !(pick.culprit && pick.motive && pick.method && pick.proof); };
-      b.append(
-        h("p", { class: "muted" }, "Everyone in the party votes. A wrong accusation costs stars, so be sure."),
-        group("Who did it?", A.culprits.map((id) => ({ id })), "culprit", (it) => ctx.suspectInfo(it.id).name),
+      const check = () => { go.disabled = !(pick.culprit && pick.motive && pick.method && pick.proof && (!hasAcc || pick.accomplice)); };
+      const groups = [
+        h("p", { class: "muted" }, hasAcc ? "Everyone in the party votes. This case needs all five parts right — culprit, accomplice, motive, method and proof — or the accusation fails." : "Everyone in the party votes. A wrong accusation costs stars, so be sure."),
+        group("Who did it?", A.culprits.map((id) => ({ id })), "culprit", (it) => ctx.suspectInfo(it.id).name)
+      ];
+      if (hasAcc) groups.push(group("Who helped them?", A.accomplices.map((id) => ({ id })), "accomplice", (it) => ctx.suspectInfo(it.id).name));
+      groups.push(
         group("Why?", A.motives, "motive", (it) => it.text),
         group("How?", A.methods, "method", (it) => it.text),
         group("Your key proof (a conclusion you earned)", concl, "proof", (it) => it.title),
         h("div", { class: "row end" }, go));
+      b.append(...groups);
     } });
   }
 
@@ -196,6 +253,9 @@ export function createBoardPanel() {
   function update(s) {
     const top = scroller.scrollTop, left = scroller.scrollLeft;
     syncCards(s); syncNotes(s); drawStrings(); drawToolbar(s); drawBanners(s);
+    scroller.classList.toggle("hidden", viewMode !== "board");
+    tlEl.classList.toggle("hidden", viewMode !== "timeline");
+    if (viewMode === "timeline") drawTimeline(s);
     // tag hit paths with their link for clicks
     strings.querySelectorAll(".string-hit").forEach((p, i) => { p._link = s.board.links[i]; });
     if (seenLinks === null) seenLinks = new Set(s.board.links.map((l) => l.id));

@@ -2,6 +2,14 @@
 // connection (or a closed tab) rejoins the same player, roles and private finds.
 import { ctx } from "./ctx.js";
 
+// HTTP base for the game server's JSON endpoints (the case catalogue). Mirrors
+// the websocket host logic in Net.url(): on github.io the API lives on the
+// VPS origin that serves the socket.
+export function apiBase() {
+  if (location.hostname.endsWith("github.io")) return "https://3danatomie.com";
+  return location.origin;
+}
+
 export class Net {
   constructor() {
     this.ws = null;

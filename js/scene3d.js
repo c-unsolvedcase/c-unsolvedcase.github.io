@@ -37,6 +37,7 @@ function iconTexture(kind, color) {
 }
 
 const COLORS = { new: "#ffc05a", held: "#6fe0d2", shared: "#8fd49a", taken: "#9aa3b2", flavor: "#d8dde8" };
+const UV_BG = new THREE.Color(0x07040f);
 
 export class SceneView {
   constructor(canvas, opts) {
@@ -57,6 +58,8 @@ export class SceneView {
     for (const k of Object.keys(COLORS)) this.tex[k] = iconTexture(k, COLORS[k]);
     this.tex.ping = iconTexture("ping", "#ffffff");
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 60);
+    this.uv = false;
+    this.uvLight = new THREE.PointLight(0x9a6bff, 0, 12, 1.2);
     this.orbit = null;
     this.ptr = new Map();
     this.running = false;
@@ -83,11 +86,15 @@ export class SceneView {
     scene.background = bg;
     scene.fog = new THREE.FogExp2(bg, 0.035);
     scene.add(gltf.scene);
-    scene.add(new THREE.HemisphereLight(0x8fa4d8, 0x1a1410, (mood.ambient != null ? mood.ambient : 0.3) * 1.4));
+    const hemi = new THREE.HemisphereLight(0x8fa4d8, 0x1a1410, (mood.ambient != null ? mood.ambient : 0.3) * 1.4);
+    scene.add(hemi);
+    const plights = [];
     for (const L of info.lights || []) {
       const l = new THREE.PointLight(new THREE.Color(L.color), L.intensity, L.distance || 8, 2);
+      l.userData.i = L.intensity; l.userData.c = L.color;
       l.position.copy(b2t(L.pos));
       scene.add(l);
+      plights.push(l);
     }
     const hot = new THREE.Group();
     scene.add(hot);
@@ -101,7 +108,7 @@ export class SceneView {
       theta0: 0, phi0: 0, vt: 0, vp: 0
     };
     orbit.theta0 = orbit.theta; orbit.phi0 = orbit.phi;
-    const rec = { id: info.id, scene, hot, orbit, exposure: mood.exposure || 1 };
+    const rec = { id: info.id, scene, hot, orbit, exposure: mood.exposure || 1, hemi, hemiI: hemi.intensity, bg, plights };
     this.cache.set(info.id, rec);
     this.onLoading(false);
     return rec;
@@ -112,8 +119,34 @@ export class SceneView {
     this.active = rec;
     this.orbit = rec.orbit;
     this.renderer.toneMappingExposure = rec.exposure;
+    rec.scene.add(this.uvLight);
+    this._applyUV();
     this.rebuildHotspots();
     return rec;
+  }
+
+  // UV / flashlight mode: the location goes dark and violet; a UV lamp rides
+  // the camera. Purely a visual treatment — which hotspots exist is data.
+  setUV(on) {
+    this.uv = !!on;
+    this._applyUV();
+  }
+
+  _applyUV() {
+    const rec = this.active;
+    if (!rec) return;
+    const on = this.uv;
+    const bg = on ? UV_BG : rec.bg;
+    rec.scene.background = bg;
+    if (rec.scene.fog) rec.scene.fog.color.copy(bg);
+    rec.hemi.color.set(on ? 0x7a5cff : 0x8fa4d8);
+    rec.hemi.intensity = rec.hemiI * (on ? 0.45 : 1);
+    for (const l of rec.plights) {
+      l.intensity = l.userData.i * (on ? 0.25 : 1);
+      l.color.set(on ? 0x8a6cff : l.userData.c);
+    }
+    this.renderer.toneMappingExposure = rec.exposure * (on ? 0.55 : 1);
+    this.uvLight.intensity = on ? 30 : 0;
   }
 
   setHotspots(list) {
@@ -252,6 +285,7 @@ export class SceneView {
     const sp = Math.sin(o.phi);
     this.camera.position.set(o.target.x + o.radius * sp * Math.sin(o.theta), o.target.y + o.radius * Math.cos(o.phi), o.target.z + o.radius * sp * Math.cos(o.theta));
     this.camera.lookAt(o.target);
+    if (this.uvLight) this.uvLight.position.copy(this.camera.position);
     const s = t / 1000;
     for (const h of this.hotspots) {
       if (h.state === "new") h.sprite.scale.setScalar(h.base * (1 + 0.14 * Math.sin(s * 3 + h.ph)));

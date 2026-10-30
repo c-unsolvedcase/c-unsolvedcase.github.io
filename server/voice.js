@@ -22,6 +22,10 @@ function allLines(C) {
     for (const p of s.present) add(s.id, p.reply);
   }
   for (const c of Object.values(C.clues)) if (c.audio) add(c.audio.speaker, c.audio.text);
+  // Live-twist interludes (Cases 2–6 declare `twists`; Case 1 has none, so its
+  // line set is unchanged). Cold-open lines deliberately stay OUT of this set:
+  // they live in the features overlay (see tools/make_feature_voices.js).
+  for (const tw of C.twists || []) add(tw.speaker, tw.text);
   add("narrator", C.epilogue.truth);
   return [...out.values()];
 }

@@ -1,11 +1,11 @@
 // App bootstrap, routing and the in-game shell.
 import { h, clear } from "./dom.js";
 import { ctx, applySettings } from "./ctx.js";
-import { Net } from "./net.js";
+import { Net, apiBase } from "./net.js";
 import { audio } from "./audio.js";
 import { voice } from "./voice.js";
 import { toast, sheet, confirmSheet, cardSheet, partySheet, settingsSheet, logSheet, howToSheet, closeAllSheets } from "./sheets.js";
-import { entryScreen, lobbyScreen, briefingOverlay, reportOverlay, resultScreen } from "./screens.js";
+import { entryScreen, lobbyScreen, briefingOverlay, reportOverlay, resultScreen, twistOverlay } from "./screens.js";
 import { createScenePanel } from "./panels/scene.js";
 import { createEvidencePanel } from "./panels/evidence.js";
 import { createSuspectsPanel } from "./panels/suspects.js";
@@ -31,11 +31,25 @@ function showEntry(code) {
   view = "entry";
   game = lobby = result = null;
   closeAllSheets();
-  clear(root).append(entryScreen({
-    code,
-    onCreate: (name) => connect({ t: "hello", create: true, name }, name),
-    onJoin: (c, name) => connect({ t: "hello", code: c, name }, name)
-  }));
+  // Render immediately with the built-in fallback (Case 1), then re-render with
+  // the server's case catalogue so the host can pick a case + difficulty before
+  // creating the party. If the catalogue cannot be fetched, the fallback stays
+  // and creating a party plays Case 1 exactly as before.
+  const render = (catalogue) => {
+    if (view !== "entry") return;
+    clear(root).append(entryScreen({
+      code,
+      cases: catalogue && catalogue.cases,
+      difficulties: catalogue && catalogue.difficulties,
+      onCreate: (name, caseId, difficulty) => connect({ t: "hello", create: true, name, caseId, difficulty }, name),
+      onJoin: (c, name) => connect({ t: "hello", code: c, name }, name)
+    }));
+  };
+  render(null);
+  fetch(apiBase() + "/api/cases")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((cat) => { if (cat && cat.cases && cat.cases.length) render(cat); })
+    .catch(() => {});
 }
 
 function connect(hello, name) {
@@ -151,10 +165,21 @@ ctx.on("msg:welcome", (m) => {
   if (location.search) history.replaceState(null, "", location.pathname);
 });
 
+let prevState = null;
 ctx.on("msg:state", (m) => {
-  ctx.state = m.s;
-  route(m.s);
-  ctx.emit("state", m.s);
+  const s = m.s;
+  // Conclusion sting: a newly earned conclusion gets its own musical figure;
+  // reaching the chapter report gets the softer chapter variant.
+  if (prevState) {
+    const before = prevState.cards.filter((c) => c.type === "conclusion").length;
+    const now = s.cards.filter((c) => c.type === "conclusion").length;
+    if (s.phase === "play" && now > before) setTimeout(() => audio.sfx("sting"), 380);
+    if (prevState.phase === "play" && s.phase === "report") audio.sfx("sting_chapter");
+  }
+  prevState = s;
+  ctx.state = s;
+  route(s);
+  ctx.emit("state", s);
   if (pendingOpen && ctx.card(pendingOpen)) { const id = pendingOpen; pendingOpen = null; cardSheet(id); }
 });
 
@@ -169,6 +194,7 @@ ctx.on("msg:found", (m) => {
 });
 ctx.on("msg:lab_done", (m) => { audio.sfx("lab"); });
 ctx.on("msg:briefing", (m) => { if (view === "game" || view === "lobby" || true) briefingOverlay(m); });
+ctx.on("msg:twist", (m) => { twistOverlay(m); });
 ctx.on("msg:emote", (m) => {
   const p = ctx.player(m.pid);
   if (!p || ctx.muted.has(m.pid)) return;

@@ -114,3 +114,51 @@ input:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px soli
 .chat-form{display:flex;gap:.5em;padding:.5em;border-top:1px solid var(--line);background:var(--bg2)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media (min-width:700px){.sheet{border-radius:20px;margin-bottom:5vh}}
+/* ---- features: rank, archive, awards, badges, share card ---- */
+.rank-line{display:flex;gap:.5em;align-items:center;justify-content:center;margin:.4em 0 0;font-family:system-ui,sans-serif}
+.rank-badge{font-size:1.3em}
+.case-stars{color:var(--acc);font-size:.85em;letter-spacing:.08em}
+.case-badges{font-size:.9em}
+.award-row{display:flex;gap:.6em;align-items:center;padding:.35em 0;border-bottom:1px solid var(--line)}
+.award-row:last-child{border:0}
+.award-ico{font-size:1.3em}
+.badge-chip{background:var(--bg3);border:1px solid var(--acc);border-radius:99px;padding:.25em .7em;font:.8em system-ui,sans-serif;color:var(--fg)}
+.badges-row{margin:.6em 0}
+.archive-row{text-align:left}
+.result .awards{text-align:left}
+/* ---- features: verdict replay ---- */
+.replay-card{max-width:520px}
+.replay-stage{position:relative;height:300px;border-radius:10px;overflow:hidden;background:#05060a;margin:.6em 0}
+.replay-canvas{width:100%;height:100%}
+.replay-time{font:700 1.05em ui-monospace,monospace;color:var(--acc);margin:.5em 0 0}
+.replay-nav{margin-top:1em}
+/* ---- features: timeline board ---- */
+.timeline{flex:1;overflow-y:auto;padding:1em;background:var(--bg)}
+.tl-empty{padding:2em 1em;text-align:center}
+.tl-step{display:flex;gap:.8em;padding:.7em 0;border-bottom:1px solid var(--line)}
+.tl-time{flex:none;min-width:5.2em;font:700 .82em ui-monospace,monospace;color:var(--acc);padding-top:.15em}
+.tl-body p{margin:.2em 0;font-size:.92em}
+.tl-body small{margin:.1em 0}
+/* ---- features: board reactions ---- */
+.bcard .react-btn{position:absolute;right:2px;bottom:2px;background:#0002;border:0;border-radius:8px;font-size:1.15em;min-width:30px;min-height:30px;padding:0;line-height:1}
+.bcard .stamp{position:absolute;top:4px;right:4px;font-size:2em;z-index:7;pointer-events:none;filter:drop-shadow(0 2px 4px #000a);animation:stampin .28s ease-out}
+@keyframes stampin{from{transform:scale(2.4) rotate(-20deg);opacity:0}}
+.react-row .react-pick{font-size:2.2em}
+/* ---- features: UV mode ---- */
+.uv-btn{position:absolute;right:8.4em;bottom:.7em;background:#0e0f13cc}
+.uv-btn.on{border-color:#a78bfa;color:#cdbcf5;background:#241543cc}
+/* ---- features: cold open ---- */
+.prologue-spots .chip.on{border-color:var(--acc);color:var(--acc)}
+.prologue-spot{margin-top:.5em}
+.prologue-spot p{background:var(--bg3);border-radius:10px;padding:.6em .8em;font-size:.92em}
+/* ---- features: lab benches ---- */
+.bench-stage{display:flex;gap:.8em;align-items:flex-start;margin:.4em 0}
+.bench-ref{flex:none;text-align:center}
+.bench-ref small{display:block;margin-top:.3em}
+.bench-main-canvas{border-radius:8px;border:1px solid var(--line);background:#efe6d0;max-width:44vw;height:auto}
+.bench-side{flex:1;min-width:0}
+.bench-cands{display:flex;gap:.5em;flex-wrap:wrap;margin:.6em 0}
+.bench-cand{background:#101018;border:2px solid var(--line);border-radius:10px;padding:.35em;display:flex;flex-direction:column;align-items:center;gap:.2em}
+.bench-cand canvas{border-radius:5px;max-width:26vw;height:auto}
+.bench-cand.on{border-color:var(--acc)}
+.bench-cand small{color:var(--mut)}

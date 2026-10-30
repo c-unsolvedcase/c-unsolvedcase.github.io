@@ -6,19 +6,37 @@
 
 const crypto = require("crypto");
 const { voiceKey } = require("./voice");
+const OVERLAYS = require("./features/overlays");
 
 const ROLES = ["field", "analyst", "interrogator", "archivist"];
 const ROLE_NAMES = { field: "Field Agent", analyst: "Analyst", interrogator: "Interrogator", archivist: "Archivist" };
 const COLORS = ["#e0a458", "#6ba6d6", "#8cc084", "#d68aa8"];
 const MAX_PLAYERS = 4;
 const EMOJI = ["👍", "❓", "💡", "😮", "🔍", "✅", "❌", "🙏"];
+const REACT_EMOJI = ["😲", "🤔", "🎯", "🔍"];
 const BAD = /\b(fuck\w*|shit\w*|bitch\w*|cunt|asshole|dick(head)?|bastard|nigg\w+|slut|whore)\b/gi;
 
 const PERSIST = [
   "code", "createdAt", "touchedAt", "hostId", "players", "order", "roleShift", "seq", "chatLog", "feedLog", "reports",
   "phase", "chapter", "shared", "testimonies", "conclusions", "cardOrder", "held", "inspected", "boardLinks", "boardPos",
-  "notes", "pending", "accusation", "suspectState", "hintLevel", "hintsUsed", "wrongLinks", "wrongAccusations", "stats", "result"
+  "notes", "pending", "accusation", "suspectState", "hintLevel", "hintsUsed", "wrongLinks", "wrongAccusations", "stats", "result",
+  "difficulty", "startedAt"
 ];
+
+// Room difficulty presets (host-chosen at party creation, carried in hello).
+// "standard" reproduces the game's original behaviour exactly: every lever is
+// the pre-difficulty constant. Other presets scale only these levers:
+//   hintsPerChapter  - how many of a chapter's 3 hints may be revealed
+//   labTolMult       - multiplier on each lab clue's commit tolerance
+//   topicGateMult    - multiplier on topic minPressure/minTrust gates
+//                      (higher = more topics stay locked longer)
+//   hintPenalty      - [hintsUsed for -1 star, hintsUsed for -2 stars]
+//   wrongLinkLimit   - wrongLinks count at which the -1 star penalty applies
+const DIFFICULTY = {
+  casual: { label: "Casual", hintsPerChapter: 3, labTolMult: 1.75, topicGateMult: 0.6, hintPenalty: [6, 12], wrongLinkLimit: Infinity },
+  standard: { label: "Standard", hintsPerChapter: 3, labTolMult: 1, topicGateMult: 1, hintPenalty: [4, 8], wrongLinkLimit: 12 },
+  master: { label: "Master", hintsPerChapter: 2, labTolMult: 0.6, topicGateMult: 1.25, hintPenalty: [3, 6], wrongLinkLimit: 6 }
+};
 
 const err = (error) => ({ error });
 const good = (extra) => Object.assign({ ok: true }, extra || {});
@@ -27,9 +45,10 @@ const pairKey = (a, b) => [a, b].sort().join("|");
 const cleanName = (n) => String(n || "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 16) || "Detective";
 
 class Room {
-  constructor(C, code) {
+  constructor(C, code, difficulty) {
     this.C = C;
     this.code = code;
+    this.difficulty = DIFFICULTY[difficulty] ? difficulty : "standard";
     this.createdAt = this.touchedAt = Date.now();
     this.hostId = null;
     this.players = {};
@@ -65,11 +84,15 @@ class Room {
     this.hintsUsed = 0;
     this.wrongLinks = 0;
     this.wrongAccusations = 0;
-    this.stats = { found: {}, links: {}, asked: {} };
+    this.stats = { found: {}, links: {}, asked: {}, lab: {}, gated: {}, wrong: {} };
     this.result = null;
+    this.startedAt = null;
   }
 
   // ------------------------------------------------------------ plumbing
+  diffParams() { return DIFFICULTY[this.difficulty] || DIFFICULTY.standard; }
+  // effective topic gate under this room's difficulty (standard: unchanged)
+  _gate(v) { return Math.ceil((v || 0) * this.diffParams().topicGateMult); }
   touch() { this.touchedAt = Date.now(); }
   emit(to, msg) { this.outbox.push({ to, msg }); }
   drain() { const o = this.outbox; this.outbox = []; return o; }
@@ -100,6 +123,9 @@ class Room {
   static restore(C, d) {
     const r = new Room(C, d.code);
     for (const k of PERSIST) if (d[k] !== undefined) r[k] = d[k];
+    if (!DIFFICULTY[r.difficulty]) r.difficulty = "standard"; // rooms saved before difficulty existed
+    // rooms saved before the awards stats existed: fill the new counters
+    r.stats = Object.assign({ found: {}, links: {}, asked: {}, lab: {}, gated: {}, wrong: {} }, r.stats || {});
     for (const p of Object.values(r.players)) p.connected = false;
     // forward-compatible: make sure every suspect has state
     for (const s of C.suspects) if (!r.suspectState[s.id]) r.suspectState[s.id] = { pressure: 0, trust: 0, asked: [], used: {}, log: [] };
@@ -229,6 +255,7 @@ class Room {
     if (this.hostId !== pid) return err("Only the host can start the case.");
     this.phase = "play";
     this.chapter = 0;
+    this.startedAt = Date.now();
     for (const [id, c] of Object.entries(this.C.clues)) if (c.start && !this.shared[id]) this._addClue(id, null);
     this.feed("story", `Case opened: ${this.C.meta.title}.`);
     this._briefing();
@@ -246,6 +273,15 @@ class Room {
     for (const p of this.playerList()) if (!open.has(p.scene)) p.scene = this.C.scenes[0].id;
     this.feed("story", `Chapter ${this.chapter + 1}: ${this.C.chapters[this.chapter].title}.`);
     this._briefing();
+    // Live twist (Cases 2–6 declare `twists`): a scripted interlude at this
+    // chapter boundary. It may grant one colour-only testimony — nothing in
+    // any requires/link/goal references it, so no proof path depends on it.
+    const tw = (this.C.twists || []).find((t) => t.chapter === this.chapter);
+    if (tw) {
+      if (tw.testimony) this._addTestimony(tw.testimony);
+      this.feed("story", tw.feed || "Something has changed.");
+      this.emit("all", { t: "twist", chapter: this.chapter, speaker: tw.speaker, text: tw.text, audio: voiceKey(tw.speaker, tw.text), testimony: tw.testimony || null });
+    }
     return good();
   }
 
@@ -339,6 +375,9 @@ class Room {
       const v = { id, type: "clue", kind: c.kind, title: c.title, text: c.text, by: s.by || null };
       if (c.analysis) {
         v.lab = { done: !!s.analysed, prompt: c.analysis.prompt, attempts: s.attempts || 0, canSkip: (s.attempts || 0) >= 2, skipped: !!s.skipped };
+        // Presentation only (overlay data): which bench renders this analysis.
+        // The mechanic — target, tolerance, difficulty — is unchanged.
+        v.lab.bench = (((OVERLAYS[C.id] || {}).labBenches) || {})[id] || null;
         if (s.analysed) v.revealed = c.analysis.revealed;
       }
       if (c.audio) v.audio = { speaker: c.audio.speaker, text: c.audio.text, key: voiceKey(c.audio.speaker, c.audio.text) };
@@ -388,8 +427,9 @@ class Room {
     if (t.error) return err(t.error);
     v = Number(v);
     if (!(v >= 0 && v <= 1)) return err("Bad value.");
-    if (Math.abs(v - t.c.analysis.target) <= t.c.analysis.tolerance) {
+    if (Math.abs(v - t.c.analysis.target) <= t.c.analysis.tolerance * this.diffParams().labTolMult) {
       t.s.analysed = true;
+      this.stats.lab[pid] = (this.stats.lab[pid] || 0) + 1;
       this.feed("lab", `Lab result on "${t.c.title}" is in.`);
       this.emit("all", { t: "lab_done", id });
       return good({ success: true });
@@ -404,6 +444,7 @@ class Room {
     if (t.s.attempts < 2) return err("Try the lab at least twice before skipping.");
     t.s.analysed = true;
     t.s.skipped = true;
+    this.stats.lab[pid] = (this.stats.lab[pid] || 0) + 1;
     this.feed("lab", `The lab processed "${t.c.title}" automatically.`);
     this.emit("all", { t: "lab_done", id });
     return good({ success: true });
@@ -419,8 +460,8 @@ class Room {
     const st = this.suspectState[sid], rq = topic.requires || {}, unmet = [];
     if ((rq.clues || []).some((c) => !this.shared[c])) unmet.push("evidence");
     if ((rq.cards || []).some((c) => !this.hasCard(c))) unmet.push("evidence");
-    if ((rq.minPressure || 0) > st.pressure) unmet.push("pressure");
-    if ((rq.minTrust || 0) > st.trust) unmet.push("trust");
+    if (this._gate(rq.minPressure) > st.pressure) unmet.push("pressure");
+    if (this._gate(rq.minTrust) > st.trust) unmet.push("trust");
     return unmet;
   }
 
@@ -448,6 +489,8 @@ class Room {
     st.trust = cap(st.trust + (topic.trust || 0));
     this._log(sid, { type: "ask", label: topic.label, speaker: sid, text: topic.answer, audio: voiceKey(sid, topic.answer), by: pid });
     this.stats.asked[pid] = (this.stats.asked[pid] || 0) + 1;
+    const rq = topic.requires || {};
+    if ((rq.clues || []).length || (rq.cards || []).length || rq.minPressure || rq.minTrust) this.stats.gated[pid] = (this.stats.gated[pid] || 0) + 1;
     this._testimony(s, topic.gives);
     return good();
   }
@@ -533,7 +576,7 @@ class Room {
     const rule = this.C.links.find((l) => pairKey(l.pair[0], l.pair[1]) === k);
     this.boardLinks.push({ id: prop.id, a: prop.a, b: prop.b, proven: !!rule, by: prop.by, at: Date.now() });
     this.stats.links[prop.by] = (this.stats.links[prop.by] || 0) + 1;
-    if (!rule) { this.wrongLinks++; return false; }
+    if (!rule) { this.wrongLinks++; this.stats.wrong[prop.by] = (this.stats.wrong[prop.by] || 0) + 1; return false; }
     if (this._addConclusion(rule.gives, [prop.a, prop.b])) {
       this.feed("board", `Link confirmed: ${this.C.conclusions[rule.gives].title}.`);
       this.emit("all", { t: "toast", text: `New conclusion: ${this.C.conclusions[rule.gives].title}`, kind: "good" });
@@ -588,7 +631,7 @@ class Room {
     if (this.phase !== "play" && this.phase !== "report") return err("No hint right now.");
     const ch = this.C.chapters[this.chapter];
     const lvl = this.hintLevel[ch.id] || 0;
-    if (lvl >= ch.hints.length) return err("No more hints for this chapter.");
+    if (lvl >= Math.min(ch.hints.length, this.diffParams().hintsPerChapter)) return err("No more hints for this chapter.");
     this.hintLevel[ch.id] = lvl + 1;
     this.hintsUsed++;
     this.feed("hint", `Hint ${lvl + 1} of ${ch.hints.length}: ${ch.hints[lvl]}`);
@@ -597,6 +640,14 @@ class Room {
   }
 
   // ------------------------------------------------------------ accusation
+  // A case MAY declare a fifth accusation part — the accomplice — by giving
+  // accusation.accomplices (option list) + accusation.answer.accomplice.
+  // Cases that don't declare it keep the original four-part accusation exactly.
+  hasAccomplice() {
+    const A = this.C.accusation;
+    return Array.isArray(A.accomplices) && A.accomplices.length > 0 && !!A.answer.accomplice;
+  }
+
   accusePropose(pid, sel) {
     if (this.phase !== "play" || !this.isFinalChapter()) return err("Finish the investigation before accusing anyone.");
     if (this.accusation) return err("An accusation is already being voted on.");
@@ -605,8 +656,11 @@ class Room {
     if (!A.culprits.includes(sel.culprit)) return err("Choose a suspect.");
     if (!A.motives.some((m) => m.id === sel.motive)) return err("Choose a motive.");
     if (!A.methods.some((m) => m.id === sel.method)) return err("Choose a method.");
+    if (this.hasAccomplice() && !A.accomplices.includes(sel.accomplice)) return err("Choose who helped them.");
     if (!this.conclusions[sel.proof]) return err("Choose a key proof from your conclusions.");
-    this.accusation = { by: pid, sel: { culprit: sel.culprit, motive: sel.motive, method: sel.method, proof: sel.proof }, votes: { [pid]: true }, at: Date.now() };
+    const pick = { culprit: sel.culprit, motive: sel.motive, method: sel.method, proof: sel.proof };
+    if (this.hasAccomplice()) pick.accomplice = sel.accomplice;
+    this.accusation = { by: pid, sel: pick, votes: { [pid]: true }, at: Date.now() };
     const who = this.C.suspects.find((s) => s.id === sel.culprit).name;
     this.feed("board", `${this.players[pid].name} proposes naming ${who}. The party must vote.`);
     this._resolveAccusation();
@@ -640,26 +694,80 @@ class Room {
     this._submit(a.sel);
   }
 
+  // End-of-case awards, computed from the per-player stats the engine already
+  // tracks. Names only — no solution data. Ties break toward the earlier
+  // joiner (party order), which keeps solo play deterministic.
+  _awards() {
+    const S = this.stats;
+    const val = (m, id) => (m && m[id]) || 0;
+    const players = this.playerList();
+    const best = (score) => {
+      let win = null, bs = 0;
+      for (const p of players) { const v = score(p.id); if (v > bs) { bs = v; win = p; } }
+      return win;
+    };
+    const out = [];
+    const push = (id, label, icon, p) => { if (p) out.push({ id, label, icon, pid: p.id, name: p.name }); };
+    push("sharpest", "Sharpest Eye", "👁", best((id) => val(S.found, id) * 100 + val(S.links, id)));
+    push("interrogator", "The Interrogator", "🗣", best((id) => val(S.gated, id) * 100 + val(S.asked, id)));
+    const part = players.filter((p) => val(S.links, p.id) + val(S.found, p.id) + val(S.asked, p.id) > 0);
+    if (part.length) {
+      let win = null, bw = Infinity, bl = -1;
+      for (const p of part) {
+        const w = val(S.wrong, p.id), l = val(S.links, p.id);
+        if (w < bw || (w === bw && l > bl)) { bw = w; bl = l; win = p; }
+      }
+      push("steady", "Steady Hand", "✋", win);
+    }
+    push("labrat", "Lab Rat", "🔬", best((id) => val(S.lab, id)));
+    return out;
+  }
+
   _submit(sel) {
     const ans = this.C.accusation.answer;
+    const hasAcc = this.hasAccomplice();
     const culpritOk = sel.culprit === ans.culprit, motiveOk = sel.motive === ans.motive;
     const methodOk = sel.method === ans.method, proofOk = ans.proofs.includes(sel.proof);
+    const accompliceOk = hasAcc ? sel.accomplice === ans.accomplice : null;
+    // Scored parts beyond the culprit: 3 in a classic case, 4 when the case
+    // declares an accomplice. The star ladder is the same shape either way.
+    const parts = hasAcc ? [motiveOk, methodOk, proofOk, accompliceOk] : [motiveOk, methodOk, proofOk];
+    const k = parts.filter(Boolean).length;
+    // A four-part case is solved by naming the culprit. A five-part (Master)
+    // case is solved only when every part is right — a wrong accomplice (or
+    // motive, method or proof) is a failed accusation: no truth, host may retry.
+    const solved = culpritOk && (!hasAcc || k === parts.length);
     let stars;
     if (!culpritOk) stars = motiveOk && methodOk ? 2 : 1;
     else {
-      const k = [motiveOk, methodOk, proofOk].filter(Boolean).length;
-      stars = 3 + (k >= 2 ? 1 : 0) + (k === 3 ? 1 : 0);
-      const penalty = (this.hintsUsed >= 8 ? 2 : this.hintsUsed >= 4 ? 1 : 0) + this.wrongAccusations + (this.wrongLinks >= 12 ? 1 : 0);
-      stars = Math.max(2, stars - penalty);
+      stars = 3 + (k >= parts.length - 1 ? 1 : 0) + (k === parts.length ? 1 : 0);
+      if (solved) {
+        const P = this.diffParams();
+        const penalty = (this.hintsUsed >= P.hintPenalty[1] ? 2 : this.hintsUsed >= P.hintPenalty[0] ? 1 : 0) + this.wrongAccusations + (this.wrongLinks >= P.wrongLinkLimit ? 1 : 0);
+        stars = Math.max(2, stars - penalty);
+      }
     }
-    const truth = culpritOk ? this.C.epilogue.truth : null;
+    const truth = solved ? this.C.epilogue.truth : null;
     this.result = {
-      solved: culpritOk, stars, culprit: sel.culprit, culpritOk, motiveOk, methodOk, proofOk,
+      solved, stars, culprit: sel.culprit, culpritOk, motiveOk, methodOk, proofOk,
       text: this.C.epilogue.results[stars], truth, truthAudio: truth ? voiceKey("narrator", truth) : null,
       hintsUsed: this.hintsUsed, wrongLinks: this.wrongLinks, wrongAccusations: this.wrongAccusations
     };
+    if (hasAcc) { this.result.accomplice = sel.accomplice; this.result.accompliceOk = accompliceOk; }
+    // Feature payload (presentation/social only; scoring above is untouched):
+    // difficulty + elapsed time for badges and the share card, awards and the
+    // true timeline for the verdict replay — the timeline is only ever sent
+    // once the case is solved.
+    this.result.difficulty = this.difficulty;
+    this.result.caseId = this.C.id;
+    this.result.timeSec = this.startedAt ? Math.max(1, Math.round((Date.now() - this.startedAt) / 1000)) : null;
+    if (solved) {
+      this.result.awards = this._awards();
+      const tl = (OVERLAYS[this.C.id] || {}).timeline;
+      if (tl && tl.length) this.result.timeline = tl;
+    }
     this.phase = "result";
-    this.feed("story", culpritOk ? `Case closed: ${stars} stars.` : "The accusation fell apart.");
+    this.feed("story", solved ? `Case closed: ${stars} stars.` : "The accusation fell apart.");
   }
 
   retry(pid) {
@@ -706,6 +814,16 @@ class Room {
     return good();
   }
 
+  // Board reactions: an ephemeral stamp on an earned card. Relayed to the
+  // room and forgotten — no persistence, no state, no scoring effect.
+  react(pid, cardId, e) {
+    if (!REACT_EMOJI.includes(e)) return err("Unknown stamp.");
+    if (!this.hasCard(cardId)) return err("The party doesn't hold that card.");
+    if (this.limited(pid, "react", 8, 5000)) return err("Too many reactions.");
+    this.emit("all", { t: "react", pid, card: cardId, e });
+    return good();
+  }
+
   ping(pid, scene, pos) {
     if (!this.sceneIds().has(scene)) return err("That location is not open.");
     if (!Array.isArray(pos) || pos.length !== 3 || !pos.every((n) => typeof n === "number" && isFinite(n) && Math.abs(n) < 100)) return err("Bad position.");
@@ -725,6 +843,16 @@ class Room {
     return good();
   }
 
+  // The case's true timeline (overlay data), gated step by step: a step is
+  // only sent once the card that evidences it has been earned, so the board's
+  // Timeline view can never leak the solution ahead of the investigation.
+  _timelineView() {
+    const tl = (OVERLAYS[this.C.id] || {}).timeline || [];
+    return tl
+      .filter((st) => !st.card || this.hasCard(st.card))
+      .map((st) => ({ time: st.time, actor: st.actor, scene: st.scene, card: st.card || null, title: st.title, text: st.text }));
+  }
+
   // ------------------------------------------------------------ views
   view(pid) {
     const C = this.C, ch = C.chapters[this.chapter];
@@ -742,7 +870,7 @@ class Room {
           else if (ins.by === pid && this.held[pid] && this.held[pid][h.clue]) state = "held";
           else state = "taken";
         }
-        return { id: h.id, pos: h.pos, state, by };
+        return { id: h.id, pos: h.pos, state, by, uv: !!h.uv };
       });
       scenes.push({ id: s.id, name: s.name, hotspots });
     }
@@ -757,7 +885,7 @@ class Room {
           const asked = st.asked.includes(t.id);
           const lock = asked ? [] : this._lock(s.id, t);
           const rq = t.requires || {};
-          const hide = lock.length && rq.minPressure && lock.includes("pressure") && st.pressure < rq.minPressure * 0.5;
+          const hide = lock.length && rq.minPressure && lock.includes("pressure") && st.pressure < this._gate(rq.minPressure) * 0.5;
           return { id: t.id, label: hide ? "..." : t.label, status: asked ? "asked" : lock.length ? "locked" : "open", lock };
         }),
         log: st.log.slice(-40), presented: Object.keys(st.used)
@@ -787,7 +915,9 @@ class Room {
         links: Object.values(this.pending).map((l) => ({ id: l.id, a: l.a, b: l.b, by: l.by })),
         accuse: this.accusation ? { by: this.accusation.by, sel: this.accusation.sel, votes: this.accusation.votes } : null
       },
-      hints: { used: this.hintsUsed, left: ch.hints.length - lvl, revealed: ch.hints.slice(0, lvl) },
+      hints: { used: this.hintsUsed, left: Math.min(ch.hints.length, this.diffParams().hintsPerChapter) - lvl, revealed: ch.hints.slice(0, lvl) },
+      difficulty: this.difficulty,
+      timeline: this._timelineView(),
       feed: this.feedLog.slice(-40),
       result: this.result,
       mustLab: Object.keys(this.shared).filter((id) => this.C.clues[id].analysis && !this.shared[id].analysed),
@@ -798,7 +928,7 @@ class Room {
 }
 
 function caseInfo(C) {
-  return {
+  const info = {
     id: C.id, meta: C.meta,
     speakers: Object.fromEntries(Object.entries(C.speakers).map(([k, v]) => [k, { name: v.name }])),
     roles: ROLES.map((r) => ({ id: r, name: ROLE_NAMES[r] })),
@@ -807,6 +937,12 @@ function caseInfo(C) {
     accusation: { culprits: C.accusation.culprits, motives: C.accusation.motives, methods: C.accusation.methods },
     emoji: EMOJI
   };
+  // Five-part cases: the client needs the accomplice option list (suspect ids
+  // only — the answer itself never leaves the server).
+  if (Array.isArray(C.accusation.accomplices) && C.accusation.accomplices.length && C.accusation.answer.accomplice) {
+    info.accusation.accomplices = C.accusation.accomplices;
+  }
+  return info;
 }
 
-module.exports = { Room, caseInfo, ROLES, ROLE_NAMES, EMOJI, MAX_PLAYERS };
+module.exports = { Room, caseInfo, ROLES, ROLE_NAMES, EMOJI, MAX_PLAYERS, DIFFICULTY };

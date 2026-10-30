@@ -6,10 +6,40 @@ const path = require("path");
 const zlib = require("zlib");
 const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
-const { Room, caseInfo: baseCaseInfo } = require("./engine");
-const cases = { case1: require("./cases/case1") };
+const { Room, caseInfo: baseCaseInfo, DIFFICULTY } = require("./engine");
+const { voiceKey } = require("./voice");
+const OVERLAYS = require("./features/overlays");
+const cases = { case1: require("./cases/case1"), case2: require("./cases/case2"), case3: require("./cases/case3"), case4: require("./cases/case4"), case5: require("./cases/case5"), case6: require("./cases/case6") };
 
-const CLIENT_DIR = path.join(__dirname, "..", "client");
+// Client layout: the author's zip nests the client in client/; the Pages
+// deployment (and this rebuild copy) keeps it at the repo root. Serve
+// whichever exists — client/ wins when both are present.
+const HAS_CLIENT_DIR = fs.existsSync(path.join(__dirname, "..", "client"));
+const CLIENT_DIR = HAS_CLIENT_DIR
+  ? path.join(__dirname, "..", "client")
+  : path.join(__dirname, "..");
+// When serving from the repo root (Pages layout), never expose the server,
+// tooling, tests or room data that share that root.
+const ROOT_DENY = new Set(["server", "tools", "tests", "data", "node_modules"]);
+
+// Case catalogue for the entry screen's case picker. Client-safe fields only:
+// no gating, no solutions. Per-case difficulty label / recommended players
+// come from meta when a case declares them (Cases 2+); defaults otherwise.
+function caseCatalogue() {
+  return {
+    cases: Object.values(cases).map((C) => ({
+      id: C.id,
+      title: C.meta.title,
+      teaser: C.meta.tagline || "",
+      summary: C.meta.summary || "",
+      difficulty: C.meta.difficulty || "Standard",
+      players: C.meta.players || "1–4",
+      chapters: C.chapters.length,
+      suspects: C.suspects.length
+    })),
+    difficulties: Object.entries(DIFFICULTY).map(([id, d]) => ({ id, label: d.label }))
+  };
+}
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".json": "application/json", ".glb": "model/gltf-binary", ".png": "image/png",
@@ -74,9 +104,27 @@ function createServer(opts = {}) {
     return { min, max };
   }
 
+  // Feature data the client may see up front (overlay module): the ambience
+  // bed per scene and the cold-open prologue (flavour only — it never carries
+  // evidence). The verdict timeline is NOT here: the engine sends it earned,
+  // step by step, in the state view, and in full only on a solved result.
+  function featuresOf(C) {
+    const ov = OVERLAYS[C.id] || {};
+    const f = { ambience: ov.ambience || {} };
+    if (ov.coldOpen) {
+      f.coldOpen = {
+        scene: ov.coldOpen.scene, title: ov.coldOpen.title,
+        beats: ov.coldOpen.beats.map((b) => ({ speaker: b.speaker, text: b.text, audio: voiceKey(b.speaker, b.text) })),
+        spots: ov.coldOpen.spots
+      };
+    }
+    return f;
+  }
+
   function caseInfo(C) {
     return Object.assign(baseCaseInfo(C), {
-      scenes: C.scenes.map((s) => ({ id: s.id, name: s.name, glb: s.glb, mood: s.mood, lights: s.lights, camera: s.camera, bounds: boundsOf(s) }))
+      scenes: C.scenes.map((s) => ({ id: s.id, name: s.name, glb: s.glb, mood: s.mood, lights: s.lights, camera: s.camera, bounds: boundsOf(s) })),
+      features: featuresOf(C)
     });
   }
 
@@ -93,7 +141,7 @@ function createServer(opts = {}) {
     for (const p of room.connected()) send(sockFor(room, p.id), { t: "state", s: room.view(p.id) });
   }
   // messages that never change the shared state: no full state push for these
-  const LIGHT = new Set(["bm", "nm", "ping", "emote", "chat", "rtc", "rtc_join", "rtc_leave", "iv_suggest", "report", "pong", "lab_probe", "ping_alive"]);
+  const LIGHT = new Set(["bm", "nm", "ping", "emote", "react", "chat", "rtc", "rtc_join", "rtc_leave", "iv_suggest", "report", "pong", "lab_probe", "ping_alive"]);
 
   // ------------------------------------------------------------ http
   function serveStatic(req, res) {
@@ -101,7 +149,9 @@ function createServer(opts = {}) {
     try { url = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch { res.writeHead(400); return res.end("bad request"); }
     if (url === "/api/health") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ ok: true, rooms: rooms.size })); }
     if (url === "/api/config") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ iceServers })); }
+    if (url === "/api/cases") { res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" }); return res.end(JSON.stringify(caseCatalogue())); }
     if (url === "/") url = "/index.html";
+    if (!HAS_CLIENT_DIR && ROOT_DENY.has(url.split("/")[1])) { res.writeHead(404, { "content-type": "text/plain" }); return res.end("not found"); }
     const file = path.normalize(path.join(CLIENT_DIR, url));
     if (!file.startsWith(CLIENT_DIR + path.sep)) { res.writeHead(403); return res.end("forbidden"); }
     fs.stat(file, (err, st) => {
@@ -191,7 +241,7 @@ function createServer(opts = {}) {
     if (m.create) {
       if (rooms.size > 500) return send(ws, { t: "err", msg: "The server is busy, try again soon.", fatal: true });
       const code = newCode();
-      room = new Room(C, code);
+      room = new Room(C, code, m.difficulty);
       rooms.set(code, room);
     } else {
       const code = String(m.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
@@ -246,6 +296,7 @@ function createServer(opts = {}) {
       case "restart": return room.restart(pid);
       case "chat": return room.chat(pid, m.text);
       case "emote": return room.emote(pid, m.e);
+      case "react": return room.react(pid, String(m.card), String(m.e));
       case "ping": return room.ping(pid, String(m.scene), m.pos);
       case "kick": {
         const r = room.kick(pid, String(m.target));

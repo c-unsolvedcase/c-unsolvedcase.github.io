@@ -91,6 +91,13 @@ export const TYPE_LABEL = { clue: "Clue", testimony: "Testimony", conclusion: "C
 // ------------------------------------------------------------------ lab mini-game
 const labValue = {}, labAttempts = {}, scribble = {};
 function labWidget(card) {
+  // Bench presentations (overlay-assigned per clue) drive the SAME probe /
+  // commit flow — the server still decides success from the value.
+  if (card.lab.bench === "fingerprint" || card.lab.bench === "photo") return benchWidget(card, card.lab.bench);
+  return sliderWidget(card);
+}
+
+function sliderWidget(card) {
   const id = card.id;
   if (labValue[id] == null) labValue[id] = 0.5;
   if (!scribble[id]) scribble[id] = Array.from({ length: 7 }, () => 40 + Math.floor(Math.random() * 55));
@@ -118,6 +125,118 @@ function labWidget(card) {
   wrap._off = off;
   apply(0.2);
   setTimeout(probe, 50);
+  return wrap;
+}
+
+// ---------------------------------------------------------- lab benches
+// Two extra presentations over the existing lab clues. Each bench offers
+// nine discrete readings (0.1…0.9, so the best is never more than 0.05 from
+// the true value — inside the standard tolerance); tapping one probes the server (identical closeness
+// feedback to the slider), and "Lock it in" commits that reading through the
+// unchanged lab_commit flow, so attempts, tolerance and difficulty forgiving
+// behave exactly as before. Artwork is procedural canvas, seeded per clue.
+const benchSel = {};
+function seededRand(seed) {
+  let a = 0;
+  for (const ch of String(seed)) a = (a * 31 + ch.charCodeAt(0)) >>> 0;
+  return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+function drawPrint(cv, seed, blurPx) {
+  const g = cv.getContext("2d");
+  const W = cv.width, H = cv.height, rnd = seededRand(seed);
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = "#efe6d0"; g.fillRect(0, 0, W, H);
+  g.filter = blurPx > 0.3 ? `blur(${blurPx.toFixed(1)}px)` : "none";
+  g.strokeStyle = "#3a3125"; g.lineCap = "round";
+  const cx = W / 2 + (rnd() - 0.5) * 8, cy = H / 2 + (rnd() - 0.5) * 8;
+  const rings = 9 + Math.floor(rnd() * 3), wob = 2 + rnd() * 4, rot = rnd() * 6.28;
+  for (let r = 1; r <= rings; r++) {
+    g.lineWidth = 1.6;
+    g.beginPath();
+    const rad = r * (Math.min(W, H) / 2 - 6) / rings;
+    for (let a = 0; a <= 6.3; a += 0.25) {
+      const rr = rad + Math.sin(a * 3 + rot + r) * wob * (r / rings);
+      const x = cx + Math.cos(a + rot) * rr, y = cy + Math.sin(a + rot) * rr * 1.18;
+      a === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+  g.filter = "none";
+}
+
+function drawStill(cv, seed, blurPx) {
+  const g = cv.getContext("2d");
+  const W = cv.width, H = cv.height, rnd = seededRand(seed);
+  g.clearRect(0, 0, W, H);
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#232838"); sky.addColorStop(1, "#101018");
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  g.filter = blurPx > 0.3 ? `blur(${blurPx.toFixed(1)}px)` : "none";
+  g.fillStyle = "#d8d2b8";
+  g.beginPath(); g.arc(W * (0.68 + rnd() * 0.1), H * 0.26, H * 0.09, 0, 7); g.fill();
+  g.fillStyle = "#0a0a10";
+  let x = -4;
+  while (x < W) {
+    const bw = 14 + rnd() * 26, bh = H * (0.3 + rnd() * 0.35);
+    g.fillRect(x, H - bh, bw, bh);
+    g.fillStyle = "#e8c96a";
+    for (let wy = H - bh + 5; wy < H - 8; wy += 9) for (let wx = x + 3; wx < x + bw - 4; wx += 8) if (rnd() > 0.45) g.fillRect(wx, wy, 3.5, 4.5);
+    g.fillStyle = "#0a0a10";
+    x += bw + 2 + rnd() * 8;
+  }
+  g.fillStyle = "#05050a"; g.fillRect(0, H - 5, W, 5);
+  g.filter = "none";
+}
+
+function benchWidget(card, kind) {
+  const id = card.id;
+  if (labAttempts[id] != null && card.lab.attempts > labAttempts[id]) toast("Not sharp enough. Keep adjusting.", "bad", 2400);
+  labAttempts[id] = card.lab.attempts;
+  const VALUES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+  const sel = benchSel[id] != null ? benchSel[id] : -1;
+
+  const main = h("canvas", { class: "bench-main-canvas", width: kind === "fingerprint" ? 132 : 200, height: kind === "fingerprint" ? 164 : 124 });
+  const meter = h("div", { class: "meter" }, h("i"));
+  const pct = h("span", { class: "pct" }, "...");
+  const candBox = h("div", { class: "bench-cands" });
+  const commit = h("button", { class: "btn", disabled: sel < 0, onclick: () => { if (benchSel[id] != null) { haptic(20); ctx.send({ t: "lab_commit", id, v: VALUES[benchSel[id]] }); } } }, kind === "fingerprint" ? "Match this print" : "Use this frame");
+  const paintMain = (blur) => { kind === "fingerprint" ? drawPrint(main, id + ":latent", blur) : drawStill(main, id + ":ref", blur); };
+  paintMain(4);
+
+  const cands = VALUES.map((v, i) => {
+    const cv = h("canvas", { width: kind === "fingerprint" ? 66 : 96, height: kind === "fingerprint" ? 82 : 60 });
+    kind === "fingerprint" ? drawPrint(cv, id + ":cand" + i, 1.2) : drawStill(cv, id + ":frame" + i, 1.2);
+    const b = h("button", { class: "bench-cand" + (i === sel ? " on" : ""), "aria-label": (kind === "fingerprint" ? "Print " : "Frame ") + (i + 1), onclick: () => {
+      benchSel[id] = i;
+      candBox.querySelectorAll(".bench-cand").forEach((x, j) => x.classList.toggle("on", j === i));
+      commit.disabled = false;
+      probe();
+    } }, cv, h("small", {}, kind === "fingerprint" ? "Print " + (i + 1) : "Frame " + (i + 1)));
+    return b;
+  });
+  candBox.append(...cands);
+
+  const apply = (c) => {
+    meter.firstChild.style.width = Math.round(c * 100) + "%";
+    meter.classList.toggle("sharp", c > 0.78);
+    pct.textContent = Math.round(c * 100) + "% match";
+    paintMain(Math.pow(1 - c, 1.6) * 7);
+  };
+  const probe = throttle(() => { if (benchSel[id] != null) ctx.send({ t: "lab_probe", id, v: VALUES[benchSel[id]] }); }, 110);
+  const off = ctx.on("msg:lab", (m) => { if (m.id === id) apply(m.closeness); });
+  if (sel >= 0) setTimeout(probe, 50);
+
+  const wrap = h("div", { class: "lab bench", "data-cleanup": "1" },
+    h("p", { class: "muted" }, "🔬 ", card.lab.prompt),
+    h("div", { class: "bench-stage" },
+      h("div", { class: "bench-ref" }, main, h("small", {}, kind === "fingerprint" ? "The latent print, developed live" : "Reference still — match its frame")),
+      h("div", { class: "bench-side" }, h("p", { class: "muted" }, kind === "fingerprint" ? "Compare the ridge cards. Tap one to develop it against the latent print." : "Compare the frames. Tap one to develop it against the reference still."), h("div", { class: "row between" }, meter, pct))),
+    candBox,
+    h("div", { class: "row end" },
+      card.lab.canSkip ? h("button", { class: "btn ghost small", onclick: () => ctx.send({ t: "lab_skip", id }) }, "Let the lab handle it") : null,
+      commit));
+  wrap._off = off;
   return wrap;
 }
 
