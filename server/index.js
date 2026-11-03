@@ -9,7 +9,7 @@ const { WebSocketServer } = require("ws");
 const { Room, caseInfo: baseCaseInfo, DIFFICULTY } = require("./engine");
 const { voiceKey } = require("./voice");
 const OVERLAYS = require("./features/overlays");
-const cases = { case1: require("./cases/case1"), case2: require("./cases/case2"), case3: require("./cases/case3"), case4: require("./cases/case4"), case5: require("./cases/case5"), case6: require("./cases/case6") };
+const cases = { case1: require("./cases/case1"), case2: require("./cases/case2"), case3: require("./cases/case3"), case4: require("./cases/case4"), case5: require("./cases/case5"), case6: require("./cases/case6"), case7: require("./cases/case7"), case8: require("./cases/case8"), case9: require("./cases/case9") };
 
 // Client layout: the author's zip nests the client in client/; the Pages
 // deployment (and this rebuild copy) keeps it at the repo root. Serve
@@ -32,12 +32,18 @@ function caseCatalogue() {
       title: C.meta.title,
       teaser: C.meta.tagline || "",
       summary: C.meta.summary || "",
-      difficulty: C.meta.difficulty || "Standard",
+      difficulty: typeof C.meta.difficulty === "string" ? C.meta.difficulty : (C.meta.difficultyLabel || "Standard"),
       players: C.meta.players || "1–4",
       chapters: C.chapters.length,
       suspects: C.suspects.length
     })),
-    difficulties: Object.entries(DIFFICULTY).map(([id, d]) => ({ id, label: d.label }))
+    difficulties: Object.entries(DIFFICULTY).map(([id, d]) => ({ id, label: d.label })),
+    // Career denominators, computed from the live data (Round 3: the client
+    // used to hardcode 28 keys / a 30-star rank ladder from the six-case era).
+    totals: {
+      keys: Object.values(OVERLAYS).reduce((n, ov) => n + Object.keys(ov.keys || {}).length, 0),
+      maxStars: Object.keys(cases).length * 5
+    }
   };
 }
 const MIME = {
@@ -145,7 +151,7 @@ function createServer(opts = {}) {
     for (const p of room.connected()) send(sockFor(room, p.id), { t: "state", s: room.view(p.id) });
   }
   // messages that never change the shared state: no full state push for these
-  const LIGHT = new Set(["bm", "nm", "ping", "emote", "react", "chat", "quick", "rtc", "rtc_join", "rtc_leave", "iv_suggest", "report", "pong", "lab_probe", "ping_alive"]);
+  const LIGHT = new Set(["bm", "nm", "ping", "emote", "react", "chat", "quick", "rtc", "rtc_join", "rtc_leave", "iv_suggest", "report", "pong", "lab_probe", "ping_alive", "mv"]);
 
   // ------------------------------------------------------------ http
   function serveStatic(req, res) {
@@ -305,6 +311,8 @@ function createServer(opts = {}) {
       case "retry": return room.retry(pid);
       case "restart": return room.restart(pid);
       case "chat": return room.chat(pid, m.text);
+      case "mv": return room.move(pid, +m.x, +m.z, +m.ry);
+      case "look": return room.setLook(pid, m.look);
       case "quick": return room.quick(pid, m.idx | 0);
       case "key": return room.collectKey(pid, String(m.scene));
       case "emote": return room.emote(pid, m.e);

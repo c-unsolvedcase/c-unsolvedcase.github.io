@@ -188,3 +188,69 @@ input:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px soli
 .prologue-panels{display:flex;gap:.45em;margin:.4em 0 .6em}
 .prologue-panel{flex:1;min-width:0;aspect-ratio:3/4.1;object-fit:cover;border-radius:8px;border:1px solid var(--line);opacity:.45;filter:saturate(.8);transition:opacity .4s, transform .4s}
 .prologue-panel.on{opacity:1;filter:none;transform:scale(1.03);border-color:#b98a2f}
+
+/* ---- Round 3: walking mode (ported from the author's patch) ---- */
+.joy{position:absolute;left:.9em;bottom:1.1em;width:7.5em;height:7.5em;border-radius:50%;background:#0e0f13aa;border:2px solid #ffffff33;touch-action:none;display:grid;place-items:center;user-select:none;z-index:25}
+.joy-knob{width:3.2em;height:3.2em;border-radius:50%;background:#ffc05acc;border:2px solid #fff6;pointer-events:none;transition:transform .05s}
+.inspect-btn{position:absolute;right:.7em;bottom:3.6em;min-width:7em;background:var(--acc);color:#14110a;font-weight:700;box-shadow:0 0 0 3px #ffc05a55,0 4px 14px #000a;z-index:25}
+.inspect-btn.hidden,.hidden.mode-btn,.hidden.outfit-btn{display:none}
+.mode-btn{position:absolute;right:.7em;top:3.3em;background:#0e0f13cc;z-index:25}
+.outfit-btn{position:absolute;right:.7em;top:5.6em;background:#0e0f13cc;z-index:25}
+.outfit-row{margin:.6em 0}.outfit-row>span{display:block;font:600 .8em system-ui,sans-serif;color:#fffa;margin-bottom:.3em}
+.swatches{display:flex;gap:.4em;flex-wrap:wrap}
+.swatch{width:2.2em;height:2.2em;border-radius:8px;border:2px solid #fff3}
+.swatch.on{border-color:#fff;box-shadow:0 0 0 2px var(--acc)}
+.scene-tip{padding:0 8.5em 0 8.8em;bottom:.7em}
+.scene-chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.scene-chips .chip{flex:none}
+.role-badge{bottom:auto;top:3.3em}
+
+/* ---- Round 3: entry wrap (portrait = one column, as before) ---- */
+.entry-wrap{display:flex;flex-direction:column;min-height:0}
+.entry-side{display:flex;flex-direction:column}
+.entry-main{display:flex;flex-direction:column;min-height:0}
+.rotate-note{display:none;border:1px dashed var(--acc);border-radius:10px;padding:.5em .8em;color:var(--acc);font-family:system-ui,sans-serif;font-size:.85em;text-align:center;margin:.2em 0 .8em}
+
+/* ---- Round 3: portrait rotate hint (in-game only) ---- */
+.rotate-hint{display:none;position:fixed;inset:0;z-index:85;background:#05060af2;flex-direction:column;align-items:center;justify-content:center;gap:.4em;text-align:center;padding:2em}
+.rotate-hint .rotate-phone{font-size:3em;animation:uc-rotate 2.4s ease-in-out infinite}
+.rotate-hint p{margin:.1em 0;max-width:26em}
+@keyframes uc-rotate{0%,20%{transform:rotate(0)}55%,80%{transform:rotate(90deg)}100%{transform:rotate(90deg)}}
+@media (orientation:portrait) and (max-width:600px){
+  .rotate-hint{display:flex}
+  .rotate-note{display:block}
+}
+
+/* ---- Round 3: landscape-first layout (phones on their side) ---- */
+@media (orientation:landscape) and (max-height:500px){
+  .screen{max-width:1060px;padding:calc(.7em + var(--safe-t)) 1.2em calc(.9em + var(--safe-b))}
+  /* entry: masthead/rank/daily pinned left, party card + archive scroll right */
+  .entry{overflow:hidden}
+  .entry-wrap{display:grid;grid-template-columns:minmax(250px,33%) minmax(0,1fr);column-gap:1.4em;height:100%}
+  .entry-side{gap:.55em;overflow:hidden}
+  .entry-side .title-block{text-align:left;margin-bottom:0}
+  .entry-side .title-block h1{font-size:2em}
+  .entry-side .rank-line{justify-content:flex-start;padding-top:0}
+  .entry-side .daily-box{margin:.2em 0}
+  .entry-main{overflow-y:auto;padding-right:.3em}
+  .entry-main .card-box{margin:.2em 0 .8em}
+  /* game shell: stage left, tab rail right */
+  .game{display:grid;grid-template-columns:minmax(0,1fr) 76px;grid-template-rows:auto auto minmax(0,1fr);grid-template-areas:"head head" "goal goal" "stage nav"}
+  .topbar{grid-area:head}
+  .goal-bar{grid-area:goal}
+  .stage{grid-area:stage}
+  .tabbar{grid-area:nav;flex-direction:column;border-top:0;border-left:1px solid var(--line);padding:0}
+  .tab{justify-content:center;padding:.3em 0}
+  .panel{padding:.7em .9em}
+  .suspect-grid{grid-template-columns:repeat(auto-fill,minmax(165px,1fr))}
+  .transcript{max-height:30vh}
+  .replay-stage{height:210px}
+  .code-big{font-size:2.1em;margin:.15em 0}
+  .lobby .card-box{margin:.5em 0}
+  /* sheets become a right-side drawer */
+  .backdrop{align-items:stretch;justify-content:flex-end}
+  .sheet{max-width:470px;height:100%;max-height:100%;border-radius:20px 0 0 20px;border-bottom:1px solid var(--line);animation:fromright .22s}
+  @keyframes fromright{from{transform:translateX(60px);opacity:0}}
+  .overlay{padding:.6em}
+  .brief-card{max-height:96vh;overflow-y:auto}
+}

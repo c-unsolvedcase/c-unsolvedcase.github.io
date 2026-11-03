@@ -89,10 +89,18 @@ export function entryScreen({ code, cases, difficulties, onCreate, onJoin }) {
         h("strong", {}, dc.title), h("br"), h("small", {}, dc.teaser || "")),
       chips.length ? h("div", { class: "row daily-chips" }, ...chips) : null);
   })();
+  // Round 3 landscape: the entry is wrapped in .entry-wrap with a side column
+  // (masthead + rank + daily) and a main column (party card + archive). In
+  // portrait the wrap is a plain column — visually identical to before, and
+  // the .entry auto-margin centring now applies to the wrap itself.
   return h("main", { class: "screen entry" },
-    h("div", { class: "title-block" }, h("p", { class: "eyebrow" }, "A co-op mystery for 1–4 detectives"), h("h1", {}, "Unsolved Case"), tag),
-    rankLine,
-    dailyBox,
+   h("div", { class: "entry-wrap" },
+    h("div", { class: "entry-side" },
+      h("div", { class: "title-block" }, h("p", { class: "eyebrow" }, "A co-op mystery for 1–4 detectives"), h("h1", {}, "Unsolved Case"), tag),
+      rankLine,
+      dailyBox),
+    h("div", { class: "entry-main" },
+    h("p", { class: "rotate-note" }, "↻ This game plays in landscape — rotate your phone when you start a case."),
     h("div", { class: "card-box" }, name,
       code
         ? h("div", {}, h("p", { class: "muted" }, "You've been invited to party ", h("strong", {}, code), "."), h("button", { class: "btn big", onclick: go((n) => onJoin(code, n)) }, "Join the investigation"))
@@ -114,7 +122,7 @@ export function entryScreen({ code, cases, difficulties, onCreate, onJoin }) {
           h("small", {}, `${"★".repeat(e.stars)}${"☆".repeat(5 - e.stars)} · ${DIFF_LABEL[e.difficulty] || "Standard"}${e.timeSec != null ? " · " + fmtTime(e.timeSec) : ""}`),
           e.badges && e.badges.length ? h("span", { class: "case-badges" }, " " + e.badges.map((b) => b.icon).join(" ")) : null)));
     })(),
-    h("div", { class: "row center" }, h("button", { class: "btn ghost small", onclick: howToSheet }, "How to play"), h("button", { class: "btn ghost small", onclick: settingsSheet }, "Settings")));
+    h("div", { class: "row center" }, h("button", { class: "btn ghost small", onclick: howToSheet }, "How to play"), h("button", { class: "btn ghost small", onclick: settingsSheet }, "Settings")))));
 }
 
 // The archive sheet: one solved case — stars, honours, badges, the epilogue,

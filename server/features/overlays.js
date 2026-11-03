@@ -213,5 +213,107 @@ module.exports = {
         { label: "A bench, mid-gallery", text: "Worn smooth by sitters. Sauer used to say you could judge a gallery by whether its benches faced the art, or the exits." }
       ]
     }
+  },
+
+  // ---------------------------------------------------------- Case 7 (ported: author's "Curtain Call")
+  case7: {
+    keys: { curtain_foyer: [-1.3, 2.3, 1.95], ashby_office: [-2.25, -0.35, 1.2], wardrobe: [1.05, 1.85, 1.45], stage: [-0.95, 0.75, 1.7], grid: [-0.35, 2.15, 1.95] },
+    ambience: { curtain_foyer: "room", ashby_office: "room", wardrobe: "hush", stage: "hush", grid: "wind" },
+    labBenches: { playbill_1999: "photo", hamper_shears: "fingerprint", cut_line_end: "photo", hatch_thread: "photo" },
+    timeline: [
+      { time: "27 years ago", actor: "Daniel Fenn", scene: "curtain_foyer", card: "c_play_stolen", title: "The stolen play", text: "Daniel Fenn writes The Glass Crown. Leonard Ashby puts his own name on it — and when Daniel's sister goes to court, Ashby has her called a liar." },
+      { time: "The years after", actor: "Margo Dane", scene: "wardrobe", card: "c_margo_is_fenn", title: "A new name", text: "Daniel never recovers. His sister takes a new surname, joins Ashby's own theatre as wardrobe supervisor — and waits." },
+      { time: "Opening night", actor: "The Marlowe", scene: "stage", card: "programme_night", title: "Opening night", text: "The Glass Crown opens under Ashby's name. Six people are backstage, and every one of them will lie about something." },
+      { time: "Act 2", actor: "Margo Dane", scene: "grid", card: "c_margo_in_grid", title: "The climb", text: "After the last quick change, Margo locks the wardrobe and climbs the hidden loft ladder to the grid with her tailor's shears." },
+      { time: "Act 2", actor: "Margo Dane", scene: "grid", card: "c_margo_cut_line", title: "Two thirds through", text: "She cuts the chandelier's line two thirds through — enough to hold the rehearsal loads, not the curtain call." },
+      { time: "21:15", actor: "The chandelier", scene: "stage", card: "c_cut_after_q40", title: "Cue 40 holds", text: "At Cue 40 the line holds the full load for thirty seconds. The cut was made after the checks, during Act 2." },
+      { time: "22:11", actor: "Leonard Ashby", scene: "stage", card: "c_line_cut", title: "Cue 88", text: "Ashby asks for the crown lowered for his bow. The parted line lets go, and the chandelier falls on the man who stole it." },
+      { time: "22:15", actor: "Wren Adair", scene: "wardrobe", card: "c_shears_taken", title: "The hamper", text: "Wren finds the shears sticky on the cutting table and, in a panic, wraps them up and hides them in the hamper." }
+    ],
+    coldOpen: {
+      scene: "stage",
+      title: "Opening night",
+      panels: ["assets/panels/case7-1.jpg", "assets/panels/case7-2.jpg", "assets/panels/case7-3.jpg"],
+      beats: [
+        { speaker: "penn", text: "Stand on the stage a moment, before the house fills. The Marlowe has played to this room for a hundred years, and tonight it opens its crown jewel — The Glass Crown, written and directed, the posters say, by Leonard Ashby." },
+        { speaker: "penn", text: "Ashby owned everything here: the building, the company, the play. Especially the play. Remember that he owned the play. It is the sort of detail that gets a man killed politely, in a theatre, in front of four hundred witnesses." },
+        { speaker: "penn", text: "At eleven minutes past ten, taking his bow, the chandelier came down on him. The coroner calls it a worn rope. The insurers, who are paid to be suspicious, would like a second opinion. Ours." },
+        { speaker: "penn", text: "Nothing here is evidence yet. But get the smell of the place — dust, greasepaint, hot lamps. Theatres remember everything. It is why they are haunted so efficiently." }
+      ],
+      spots: [
+        { label: "The chandelier", text: "A crown of glass and brass, hanging over the mark where Ashby took his bows. From the stalls it is the prettiest thing in the building. From the grid, it is a weight on a rope." },
+        { label: "The ghost light", text: "A single bulb left burning on the empty stage. Tradition says it keeps the ghosts company. The stage manager says it keeps actors from falling into the pit. Both, probably." },
+        { label: "The prompt corner", text: "The book, the cue lights, the stage manager's desk. Whoever sits here knows the show to the second — every entrance, every cue, every weight that flies." }
+      ]
+    }
+  },
+
+  // ---------------------------------------------------------- Case 8 (ported: author's "Station Nine")
+  case8: {
+    keys: { cold_store: [-2.15, 1.45, 1.4], mess: [-0.05, 2.3, 2.05], plant: [-1.55, -0.05, 1.15], radio: [2.3, 1.75, 1.5], lab: [0.85, -0.15, 1.18] },
+    ambience: { cold_store: "hush", mess: "room", plant: "room", radio: "hush", lab: "room" },
+    labBenches: { thermo_chart: "photo", core_14b: "photo", purple_parka: "photo", dataset_metadata: "photo" },
+    timeline: [
+      { time: "Years ago", actor: "Dr. Marit Solheim", scene: "lab", card: "c_marit_inflated", title: "Core 14-B", text: "Marit pads the layer count in Core 14-B to keep her grant alive. The published record of the ice is wrong, and only she knows by how much." },
+      { time: "This winter", actor: "Anselm Voss", scene: "lab", card: "c_core_mismatch", title: "The recount", text: "Voss, recounting the core by hand, finds the truth. He decides to say so on the satphone at eight in the morning." },
+      { time: "Midwinter dinner", actor: "Anselm Voss", scene: "mess", card: "c_voss_withdraw", title: "The toast", text: "At the midwinter dinner Voss says as much in his toast, in front of the whole station. The deadline is now public — and so is hers." },
+      { time: "Before midnight", actor: "Dr. Marit Solheim", scene: "plant", card: "c_weir_bribed", title: "Three thousand", text: "Through the grant ledger, Marit has paid Jonas Weir three thousand to prepare the cold store: alarm to maintenance, release pin pulled, camera unplugged." },
+      { time: "Before midnight", actor: "Jonas Weir", scene: "plant", card: "c_weir_sabotage", title: "The preparation", text: "Weir does the work he was paid for. The cold store is made into a trap that looks like a machine being a machine." },
+      { time: "After dinner", actor: "Dr. Marit Solheim", scene: "mess", card: "c_card_borrowed", title: "Peg 4", text: "Marit takes Clara Reid's card from peg 4, so the door log will tell the wrong name." },
+      { time: "23:11", actor: "Marit & Voss", scene: "cold_store", card: "c_marit_at_cold_store", title: "The cold store", text: "Under a pretext Marit leads Voss into the cold store, steps out, and lets the door latch behind her." },
+      { time: "23:15", actor: "Jonas Weir", scene: "plant", card: "c_weir_heater", title: "The heater dies", text: "Weir kills the door heater so the seal will freeze fast and hard. Inside, the cold begins its slow work." },
+      { time: "Afterwards", actor: "Pavel Koval", scene: "radio", card: "c_koval_protecting", title: "The false shield", text: "Pavel Koval, who loves her, tries to take the blame. The doctor writes 'accident', and the cold keeps the rest." }
+    ],
+    coldOpen: {
+      scene: "cold_store",
+      title: "The door that latched",
+      panels: ["assets/panels/case8-1.jpg", "assets/panels/case8-2.jpg", "assets/panels/case8-3.jpg"],
+      beats: [
+        { speaker: "penn", text: "Mind the threshold. This is the cold store of Station Nine, Antarctica, in the middle of the midwinter dark — the room where the station keeps its food, its ice cores, and, for one night, its chief scientist." },
+        { speaker: "penn", text: "Seven people winter here. Seven. When something goes wrong at a polar station there is no stranger to blame and no door out of the dark. There is only ever one of the seven." },
+        { speaker: "penn", text: "Anselm Voss was found here in the morning, frozen, and the station's doctor wrote 'accident'. But the door latched from the outside, the alarm was silent, and Voss was a man who checked everything twice. Including, in the end, his own data." },
+        { speaker: "penn", text: "Look around before we begin. Everything here is labelled, logged and frozen. Even the lies keep well in this room." }
+      ],
+      spots: [
+        { label: "The door seal", text: "Rubber, steel, and a skin of frost. When this door closes, the cold inside stops being weather and becomes a sentence." },
+        { label: "The core racks", text: "Cylinders of ancient ice in their tubes, each one a year of the world's weather, written in bubbles. People have built whole careers on these — and buried them here too." },
+        { label: "The alarm panel", text: "A small panel of patient lights. It is supposed to scream if the door is shut with someone inside. On the night in question, it had nothing to say." }
+      ]
+    }
+  },
+
+  // ---------------------------------------------------------- Case 9 (ported: author's "The Midnight Express")
+  case9: {
+    keys: { compartment: [0.3, 1.8, 1.75], corridor: [1.65, 1.6, 1.85], dining: [3.7, 0.25, 1.8], lounge: [2.45, 1.75, 1.2], baggage: [-2.75, -0.05, 1.1], guard: [-0.25, 1.8, 2.05] },
+    ambience: { compartment: "train", corridor: "train", dining: "hush", lounge: "hush", baggage: "train", guard: "train" },
+    labBenches: { vale_pillbox: "fingerprint", brandy_glass: "fingerprint", sapphire_case: "photo", provenance_papers: "photo", pantry_decanter: "fingerprint", stopped_watch: "photo" },
+    timeline: [
+      { time: "Twelve years", actor: "Lucian Fairweather", scene: "dining", card: "c_forgeries", title: "The forgeries", text: "For twelve years Fairweather forges the provenance papers for the pieces Vale sells. The firm's respectability is built on his handwriting." },
+      { time: "This week", actor: "Sebastian Vale", scene: "dining", card: "c_vale_exposure", title: "The watermark", text: "Vale finds the watermark — the proof of the forgeries — and tells his partner he will dissolve the firm and expose him at Valmer." },
+      { time: "That evening", actor: "Lucian Fairweather", scene: "corridor", card: "c_fw_paid_brenner", title: "Two thousand", text: "Fairweather bribes the steward Tomas Brenner with two thousand to swap Vale's decanter for a stoppered one prepared with foxglove tincture." },
+      { time: "23:40", actor: "Tomas Brenner", scene: "corridor", card: "c_brenner_tray", title: "The tray", text: "Brenner brings the nightcap tray at twenty to twelve. The decanter on it is not the one that left the pantry cellar — it is the prepared one." },
+      { time: "Midnight", actor: "Sebastian Vale", scene: "compartment", card: "c_poison_in_brandy", title: "The nightcap", text: "Vale drinks his brandy at midnight, in a locked compartment, from a decanter his steward carried in. The foxglove begins its work." },
+      { time: "After midnight", actor: "Lucian Fairweather", scene: "lounge", card: "c_fairweather_absent", title: "The lounge clock", text: "Fairweather slips away from the bridge table — by the lounge clock that nobody had reset, his absence is longer than anyone first reckons." },
+      { time: "After midnight", actor: "Lucian Fairweather", scene: "compartment", card: "c_staged", title: "The staging", text: "Through the connecting door he swaps the decanters back, doubles Vale's capsules to stage a heart failure, and draws the bolt home with a wire." },
+      { time: "01:50", actor: "Sebastian Vale", scene: "compartment", card: "c_death_time", title: "Ten to two", text: "Vale dies at ten to two, train time. The doctor, deceived by the staging, will sign a certificate of natural causes." },
+      { time: "An hour later", actor: "Ivana Kessler", scene: "baggage", card: "c_ivana_thief", title: "The second crime", text: "Ivana Kessler, desperate for her mother's treatment, uses a signed spare key to swap the sapphire for a paste copy — and finds a dead man already cold. Two crimes, two culprits, one clock." },
+      { time: "Morning", actor: "Dr. Marchetti", scene: "guard", card: "c_doctor_sealed", title: "Natural causes", text: "The doctor seals the compartment and signs. Everything is tidy, official — and wrong in every particular that matters." }
+    ],
+    coldOpen: {
+      scene: "compartment",
+      title: "The night train",
+      panels: ["assets/panels/case9-1.jpg", "assets/panels/case9-2.jpg", "assets/panels/case9-3.jpg"],
+      beats: [
+        { speaker: "penn", text: "Mind the step up. This is Sebastian Vale's compartment on the Midnight Express — first class, locked from the inside, and in the morning, a problem no timetable can solve." },
+        { speaker: "penn", text: "Vale dealt in beautiful old things with beautiful old papers. His partner, Lucian Fairweather, wrote half of those papers himself — which was a crime, then a fortune, and finally, this week, a deadline." },
+        { speaker: "penn", text: "Vale drank his nightcap at midnight and died before two, behind a bolted door, and the train's doctor signed it natural causes by breakfast. The railway prefers its deaths tidy. This one was arranged to be exactly that." },
+        { speaker: "penn", text: "Look about the compartment first. On a night train, everything is close, everything is heard, and every clock on board disagrees with the next one. Remember that. It matters here." }
+      ],
+      spots: [
+        { label: "The connecting door", text: "Between this compartment and the next, a door that is supposed to stay locked from both sides. Supposed to. The bolt is bright where it has been worked." },
+        { label: "The nightcap tray", text: "A silver tray, a decanter, a glass — the small ceremony of a rich man's midnight. Someone on this train took great care with this tray. Greater care than service requires." },
+        { label: "The window blind", text: "Drawn against the night. Beyond the glass, the line climbs toward Karst Pass, and the clocks of two countries take turns to be right." }
+      ]
+    }
   }
 };

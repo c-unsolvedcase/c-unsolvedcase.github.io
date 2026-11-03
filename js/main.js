@@ -11,7 +11,7 @@ import { createEvidencePanel } from "./panels/evidence.js";
 import { createSuspectsPanel } from "./panels/suspects.js";
 import { createBoardPanel } from "./panels/board.js";
 import { createChatPanel } from "./panels/chat.js";
-import { recordKey, markPlayedToday, fmtTime } from "./progress.js";
+import { recordKey, markPlayedToday, fmtTime, setCareerMeta } from "./progress.js";
 
 const root = document.getElementById("app");
 ctx.net = new Net();
@@ -38,6 +38,7 @@ function showEntry(code) {
   // and creating a party plays Case 1 exactly as before.
   const render = (catalogue) => {
     if (view !== "entry") return;
+    if (catalogue && catalogue.totals) setCareerMeta(catalogue.totals);
     clear(root).append(entryScreen({
       code,
       cases: catalogue && catalogue.cases,
@@ -92,7 +93,15 @@ function buildGame() {
     stage.append(panels[id].el);
   }
   const reportO = reportOverlay();
+  // Round 3: the game is landscape-first. In portrait the stage is covered
+  // by a friendly rotate hint (the tab bar stays reachable; the entry and
+  // lobby screens, which live outside .game, are never blocked).
+  const rotateHint = h("div", { class: "rotate-hint", "aria-hidden": "true" },
+    h("div", { class: "rotate-phone" }, "📱"),
+    h("p", {}, h("strong", {}, "Rotate your phone to play")),
+    h("p", { class: "muted" }, "Unsolved Case is played in landscape — the room, your party and the board all need the width."));
   const el = h("main", { class: "game" }, head, goals, stage, nav);
+  el.append(rotateHint); // fixed + high z-index: covers sheets too in portrait
 
   function select(id) {
     if (cur === id) return;

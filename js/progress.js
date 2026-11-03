@@ -5,11 +5,26 @@
 
 const KEY = "uc.progress.v1";
 
-// 6 cases × 5 stars = 30: a full clear reaches the top rank.
-export const RANKS = [
-  [0, "Rookie"], [6, "Constable"], [12, "Sergeant"],
-  [18, "Inspector"], [24, "Chief Inspector"], [30, "Master Detective"]
-];
+// Career denominators are data-driven (Round 3): the server catalogue
+// reports how many brass keys exist (one per scene, from the feature
+// overlays) and how many stars a full clear is worth (5 per case). The
+// defaults below match the current nine-case game so even the pre-fetch
+// fallback render is right; main.js calls setCareerMeta() with the
+// catalogue's totals as soon as they arrive. The rank ladder keeps its
+// six named steps spread evenly across the full-clear total, so a full
+// clear always reaches Master Detective (6 cases -> 30, 9 cases -> 45).
+const RANK_NAMES = ["Rookie", "Constable", "Sergeant", "Inspector", "Chief Inspector", "Master Detective"];
+let careerMeta = { keys: 44, maxStars: 45 };
+export function setCareerMeta(t) {
+  if (!t) return;
+  if (Number.isFinite(t.keys) && t.keys > 0) careerMeta.keys = t.keys;
+  if (Number.isFinite(t.maxStars) && t.maxStars > 0) careerMeta.maxStars = t.maxStars;
+}
+export function ranks() {
+  const step = careerMeta.maxStars / (RANK_NAMES.length - 1);
+  return RANK_NAMES.map((name, i) => [Math.round(step * i), name]);
+}
+export const RANKS = ranks();
 
 export function loadProgress() {
   try {
@@ -33,9 +48,10 @@ export function totalStars(p) {
 }
 
 export function rankFor(total) {
-  let cur = RANKS[0], next = null;
-  for (let i = 0; i < RANKS.length; i++) {
-    if (total >= RANKS[i][0]) { cur = RANKS[i]; next = RANKS[i + 1] || null; }
+  const ladder = ranks();
+  let cur = ladder[0], next = null;
+  for (let i = 0; i < ladder.length; i++) {
+    if (total >= ladder[i][0]) { cur = ladder[i]; next = ladder[i + 1] || null; }
   }
   return { name: cur[1], at: cur[0], next: next ? { name: next[1], at: next[0] } : null };
 }
@@ -99,7 +115,7 @@ export function recordResult(info, s) {
 }
 
 // ---- I1: brass-key collection (local mirror of the hunts you joined) ----
-export const TOTAL_KEYS = 28; // one per scene across all six cases
+export const TOTAL_KEYS = 44; // fallback only — the live total comes from setCareerMeta (server catalogue)
 
 export function recordKey(caseId, sceneId) {
   const p = loadProgress();
@@ -110,7 +126,8 @@ export function recordKey(caseId, sceneId) {
 
 export function keyProgress(p) {
   const found = Object.values(p.keys || {}).reduce((a, l) => a + (l ? l.length : 0), 0);
-  return { found, total: TOTAL_KEYS, complete: found >= TOTAL_KEYS };
+  const total = careerMeta.keys;
+  return { found, total, complete: found >= total };
 }
 
 // ---- I6: daily spotlight + play streak ----

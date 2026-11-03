@@ -92,7 +92,23 @@ class Room {
   }
 
   // ------------------------------------------------------------ plumbing
-  diffParams() { return DIFFICULTY[this.difficulty] || DIFFICULTY.standard; }
+  diffParams() {
+    const base = DIFFICULTY[this.difficulty] || DIFFICULTY.standard;
+    // Round 3 port: the author's cases carry per-case `rules` (their only
+    // tuning — the author's engine had no difficulty presets). Honour them
+    // at the Standard tier, which is the author's intended tuning for the
+    // case; Casual/Master keep the global presets. Cases 1–6 declare no
+    // rules, so their difficulty semantics are untouched.
+    const R = this.C.rules;
+    if (!R || this.difficulty !== "standard") return base;
+    return Object.assign({}, base, {
+      hintPenalty: Array.isArray(R.hintPenaltyAt) ? R.hintPenaltyAt : base.hintPenalty,
+      wrongLinkLimit: R.wrongLinkLimit != null ? R.wrongLinkLimit : base.wrongLinkLimit
+    });
+  }
+  // Lab attempts before a skip is allowed: the case's own rules when it
+  // declares them (ported cases: 3–4), else the long-standing default of 2.
+  _labSkipAfter() { return (this.C.rules && this.C.rules.labSkipAfter) || 2; }
   // effective topic gate under this room's difficulty (standard: unchanged)
   _gate(v) { return Math.ceil((v || 0) * this.diffParams().topicGateMult); }
   touch() { this.touchedAt = Date.now(); }
@@ -396,7 +412,7 @@ class Room {
       const c = C.clues[id], s = this.shared[id] || {};
       const v = { id, type: "clue", kind: c.kind, title: c.title, text: c.text, by: s.by || null };
       if (c.analysis) {
-        v.lab = { done: !!s.analysed, prompt: c.analysis.prompt, attempts: s.attempts || 0, canSkip: (s.attempts || 0) >= 2, skipped: !!s.skipped };
+        v.lab = { done: !!s.analysed, prompt: c.analysis.prompt, attempts: s.attempts || 0, canSkip: (s.attempts || 0) >= this._labSkipAfter(), skipped: !!s.skipped };
         // Presentation only (overlay data): which bench renders this analysis.
         // The mechanic — target, tolerance, difficulty — is unchanged.
         v.lab.bench = (((OVERLAYS[C.id] || {}).labBenches) || {})[id] || null;
@@ -457,13 +473,14 @@ class Room {
       return good({ success: true });
     }
     t.s.attempts++;
-    return good({ success: false, attempts: t.s.attempts, canSkip: t.s.attempts >= 2 });
+    return good({ success: false, attempts: t.s.attempts, canSkip: t.s.attempts >= this._labSkipAfter() });
   }
 
   labSkip(pid, id) {
     const t = this._lab(pid, id);
     if (t.error) return err(t.error);
-    if (t.s.attempts < 2) return err("Try the lab at least twice before skipping.");
+    const need = this._labSkipAfter();
+    if (t.s.attempts < need) return err(need === 2 ? "Try the lab at least twice before skipping." : `Try the lab at least ${need} times before skipping.`);
     t.s.analysed = true;
     t.s.skipped = true;
     this.stats.lab[pid] = (this.stats.lab[pid] || 0) + 1;
@@ -858,6 +875,31 @@ class Room {
     this.emit("all", { t: "chat", msg: m });
   }
 
+  // Walking mode (Round 3 port): positions are relayed to the party and
+  // never change the shared game state.
+  move(pid, x, z, ry) {
+    const p = this.players[pid];
+    if (!p || ![x, z, ry].every((n) => typeof n === "number" && isFinite(n)) || Math.abs(x) > 30 || Math.abs(z) > 30) return err("Bad position.");
+    if (this.limited(pid, "mv", 14, 1000)) return good();
+    p.pos = { x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, ry: Math.round(ry * 100) / 100 };
+    this.emit("all", { t: "mv", pid, scene: p.scene, x: p.pos.x, z: p.pos.z, ry: p.pos.ry });
+    return good();
+  }
+
+  setLook(pid, look) {
+    const p = this.players[pid];
+    if (!p) return err("Unknown player.");
+    const hex = (v, d) => (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : d);
+    const pick = (v, list, d) => (list.includes(v) ? v : d);
+    look = look || {};
+    p.look = {
+      skin: hex(look.skin, "#e0b790"), shirt: hex(look.shirt, null), pants: hex(look.pants, "#2a3040"),
+      hair: pick(look.hair, ["none", "short", "spiky", "cap", "long"], "short"), hairColor: hex(look.hairColor, "#2a2420"),
+      face: pick(look.face, ["smile", "grin", "cool", "wink"], "smile")
+    };
+    return good();
+  }
+
   chat(pid, text) {
     text = String(text || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 240);
     if (!text) return err("Empty message.");
@@ -969,7 +1011,7 @@ class Room {
       code: this.code, phase: this.phase, you: pid, host: this.hostId,
       players: this.playerList().map((p) => ({
         id: p.id, name: p.name, color: p.color, roles: p.roles, roleNames: p.roles.map((r) => ROLE_NAMES[r]),
-        connected: p.connected, scene: p.scene, voice: this.voice.has(p.id),
+        connected: p.connected, scene: p.scene, look: p.look || null, voice: this.voice.has(p.id),
         found: this.stats.found[p.id] || 0, links: this.stats.links[p.id] || 0, asked: this.stats.asked[p.id] || 0
       })),
       chapter: {

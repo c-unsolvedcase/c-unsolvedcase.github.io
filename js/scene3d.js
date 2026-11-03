@@ -3,6 +3,7 @@
 // by role, so a Field Agent literally sees markers that the Archivist does not.
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { makeAvatar, animateAvatar, buildCollision, stepMove, findSpawn, clampToRoom } from "./walk.js";
 
 const b2t = (p) => new THREE.Vector3(p[0], p[2], -p[1]); // Blender (x,y,z-up) -> three (x,y-up,-z)
 const QUALITY = { low: { pr: 1, aa: false }, medium: { pr: 1.5, aa: true }, high: { pr: 2, aa: true } };
@@ -74,6 +75,16 @@ export class SceneView {
     this.canvas = canvas;
     this.onTap = opts.onTap || (() => {});
     this.onLoading = opts.onLoading || (() => {});
+    // Walking mode (Round 3 port of the author's patch): third-person avatar
+    // by default; "orbit" keeps the original overview behaviour.
+    this.onNear = opts.onNear || (() => {});
+    this.onMove = opts.onMove || (() => {});
+    this.controls = opts.controls || null;
+    this.mode = opts.mode || "walk";           // "walk" (third person) or "orbit" (overview)
+    this.me = { x: 0, z: 0, ry: 0, yaw: 0, pitch: 0.5, dist: 3.8, speed: 0, id: null, look: null, name: "", color: "#2f8fbf", av: null };
+    this.remote = new Map();                   // pid -> { av, x, z, ry, tx, tz, tr, scene, sig }
+    this.near = null;
+    this.lastSend = 0; this.lastSent = [0, 0, 0]; this.lastT = 0; this.visited = new Map();
     this.quality = opts.quality || "medium";
     this.fpsCap = opts.fps || 60;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: QUALITY[this.quality].aa, powerPreference: "high-performance" });
@@ -145,7 +156,8 @@ export class SceneView {
       theta0: 0, phi0: 0, vt: 0, vp: 0
     };
     orbit.theta0 = orbit.theta; orbit.phi0 = orbit.phi;
-    const rec = { id: info.id, scene, hot, orbit, exposure: mood.exposure || 1, hemi, hemiI: hemi.intensity, bg, plights };
+    const col = buildCollision(gltf.scene);
+    const rec = { id: info.id, scene, hot, orbit, col, exposure: mood.exposure || 1, hemi, hemiI: hemi.intensity, bg, plights };
     this.cache.set(info.id, rec);
     this.onLoading(false);
     return rec;
@@ -153,8 +165,14 @@ export class SceneView {
 
   async show(info) {
     const rec = await this.load(info);
+    if (this.active && this.active !== rec) this.visited.set(this.active.id, { x: this.me.x, z: this.me.z, ry: this.me.ry, yaw: this.me.yaw });
     this.active = rec;
     this.orbit = rec.orbit;
+    const v = this.visited.get(rec.id);
+    if (v) Object.assign(this.me, v);
+    else { const [x, z] = findSpawn(rec.col, this.spawnIx || 0); Object.assign(this.me, { x, z, ry: Math.PI, yaw: 0 }); }
+    this.syncAvatars(true);
+    this.near = null; this.onNear(null);
     this.renderer.toneMappingExposure = rec.exposure;
     rec.scene.add(this.uvLight);
     rec.scene.add(this.camLight);
@@ -162,6 +180,72 @@ export class SceneView {
     this.rebuildHotspots();
     return rec;
   }
+
+  // ---- walking mode: avatars (ported from the author's patch)
+  setMode(mode) { this.mode = mode; if (this.controls) this.controls.show(mode === "walk"); this.syncAvatars(true); if (mode !== "walk") { this.near = null; this.onNear(null); } }
+
+  // players: [{ id, name, color, look, scene, connected }]; meId: this player's id
+  setPlayers(players, meId, myLook) {
+    this.players = players; this.me.id = meId;
+    const me = players.find((p) => p.id === meId);
+    if (me) { this.me.name = me.name; this.me.color = me.color; }
+    this.me.look = myLook || (me && me.look) || null;
+    this.spawnIx = Math.max(0, players.findIndex((p) => p.id === meId));
+    this.syncAvatars(false);
+  }
+
+  moveRemote(pid, scene, x, z, ry) {
+    const r = this.remote.get(pid) || this.remote.set(pid, {}).get(pid);
+    Object.assign(r, { tx: x, tz: z, tr: ry, scene });
+    if (r.x === undefined) { r.x = x; r.z = z; r.ry = ry; }
+    this.syncAvatars(false);
+  }
+
+  syncAvatars(force) {
+    if (!this.active) return;
+    const sc = this.active.scene;
+    const L = this.me;
+    const sig = JSON.stringify([L.look, L.color, L.name]);
+    if (force || !L.av || L.sig !== sig) {
+      if (L.av) sc.remove(L.av);
+      L.av = makeAvatar(L.look, L.color, L.name); L.sig = sig; sc.add(L.av);
+    } else if (L.av.parent !== sc) sc.add(L.av);
+    L.av.visible = this.mode === "walk";
+    const want = new Set();
+    for (const p of this.players || []) {
+      if (p.id === L.id || !p.connected || p.scene !== this.active.id) continue;
+      want.add(p.id);
+      const r = this.remote.get(p.id) || this.remote.set(p.id, {}).get(p.id);
+      const psig = JSON.stringify([p.look, p.color, p.name]);
+      if (!r.av || r.sig !== psig || force) {
+        if (r.av && r.av.parent) r.av.parent.remove(r.av);
+        r.av = makeAvatar(p.look, p.color, p.name); r.sig = psig;
+      }
+      if (r.scene !== this.active.id || r.x === undefined) {
+        const [x, z] = findSpawn(this.active.col, (this.players || []).findIndex((q) => q.id === p.id));
+        Object.assign(r, { x, z, ry: Math.PI, tx: x, tz: z, tr: Math.PI, scene: this.active.id });
+      }
+      if (r.av.parent !== sc) sc.add(r.av);
+      r.av.visible = this.mode === "walk";
+    }
+    for (const [pid, r] of this.remote) if (!want.has(pid) && r.av && r.av.parent) r.av.parent.remove(r.av);
+  }
+
+  // for tests and "go to" shortcuts: stand near a hotspot
+  teleportNear(id) {
+    const h = this.hotspots.find((x) => x.id === id);
+    if (!h || !this.active) return false;
+    const c = this.active.col;
+    for (const d of [0.9, 1.1, 0.7, 1.3]) for (let a = 0; a < 16; a++) {
+      const x = h.pos.x + Math.cos(a * Math.PI / 8) * d, z = h.pos.z + Math.sin(a * Math.PI / 8) * d;
+      const [cx, cz] = clampToRoom(c, x, z);
+      const [mx, mz] = stepMove(c, cx, cz, 0, 0);
+      if (Math.hypot(mx - h.pos.x, mz - h.pos.z) < 1.5 && Math.hypot(mx - cx, mz - cz) < 1e-6) { this.me.x = mx; this.me.z = mz; return true; }
+    }
+    return false;
+  }
+
+  dist2(h) { return Math.hypot(h.pos.x - this.me.x, h.pos.z - this.me.z); }
 
   // UV / flashlight mode: the location goes dark and violet; a UV lamp rides
   // the camera. Purely a visual treatment — which hotspots exist is data.
@@ -283,7 +367,13 @@ export class SceneView {
       if (!p || !this.orbit) return;
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.x = e.clientX; p.y = e.clientY;
-      if (this.ptr.size === 1) {
+      if (this.ptr.size === 1 && this.mode === "walk") {
+        this.me.yaw -= dx * 0.006; this.me.pitch = Math.max(0.15, Math.min(1.0, this.me.pitch + dy * 0.004));
+      } else if (this.ptr.size === 2 && this.mode === "walk") {
+        const d = this.pinchDist();
+        if (this.lastPinch) this.me.dist = Math.max(1.8, Math.min(5, this.me.dist * (this.lastPinch / d)));
+        this.lastPinch = d;
+      } else if (this.ptr.size === 1) {
         const o = this.orbit;
         o.theta -= dx * 0.005; o.phi -= dy * 0.004;
         o.vt = -dx * 0.005; o.vp = -dy * 0.004;
@@ -307,6 +397,7 @@ export class SceneView {
     el.addEventListener("wheel", (e) => {
       if (!this.orbit) return;
       e.preventDefault();
+      if (this.mode === "walk") { this.me.dist = Math.max(1.8, Math.min(5, this.me.dist * (1 + Math.sign(e.deltaY) * 0.08))); return; }
       this.orbit.radius = Math.max(this.orbit.minR, Math.min(this.orbit.maxR, this.orbit.radius * (1 + Math.sign(e.deltaY) * 0.08)));
     }, { passive: false });
     window.addEventListener("resize", () => this.resize());
@@ -343,7 +434,7 @@ export class SceneView {
       const d = Math.hypot(sx - cx, sy - cy);
       if (d < bd) { bd = d; best = h; }
     }
-    if (best) this.onTap({ id: best.id, state: best.state, by: best.by, pos: best.bpos });
+    if (best) this.onTap({ id: best.id, state: best.state, by: best.by, pos: best.bpos, far: this.mode === "walk" && this.dist2(best) > 2.0 });
   }
 
   resize() {
@@ -371,16 +462,65 @@ export class SceneView {
 
   stop() { this.running = false; cancelAnimationFrame(this.raf); }
 
+  walkFrame(t) {
+    const dt = Math.min(0.05, this.lastT ? (t - this.lastT) / 1000 : 0.016);
+    this.lastT = t;
+    const m = this.me, col = this.active.col;
+    const inp = this.controls ? this.controls.read() : { x: 0, y: 0 };
+    const mag = Math.hypot(inp.x, inp.y);
+    if (mag > 0.08) {
+      const fx = -Math.sin(m.yaw), fz = -Math.cos(m.yaw), rx = Math.cos(m.yaw), rz = -Math.sin(m.yaw);
+      const vx = fx * inp.y + rx * inp.x, vz = fz * inp.y + rz * inp.x;
+      const sp = 2.3 * Math.min(1, mag);
+      const [nx, nz] = stepMove(col, m.x, m.z, vx * sp * dt, vz * sp * dt);
+      const moved = Math.hypot(nx - m.x, nz - m.z);
+      m.x = nx; m.z = nz;
+      const want = Math.atan2(vx, vz);
+      let d = want - m.ry; d = Math.atan2(Math.sin(d), Math.cos(d));
+      m.ry += d * Math.min(1, dt * 14);
+      m.speed = Math.min(1, moved / (sp * dt + 1e-6)) * Math.min(1, mag);
+    } else m.speed = 0;
+    if (m.av) { m.av.position.set(m.x, 0, m.z); m.av.rotation.y = m.ry; animateAvatar(m.av, dt, m.speed); }
+    for (const r of this.remote.values()) {
+      if (!r.av || !r.av.parent) continue;
+      const dx = r.tx - r.x, dz = r.tz - r.z, k = Math.min(1, dt * 10);
+      const rsp = Math.hypot(dx, dz) / Math.max(dt, 0.001) / 2.3;
+      r.x += dx * k; r.z += dz * k;
+      let d = r.tr - r.ry; d = Math.atan2(Math.sin(d), Math.cos(d)); r.ry += d * k;
+      r.av.position.set(r.x, 0, r.z); r.av.rotation.y = r.ry; animateAvatar(r.av, dt, Math.min(1, rsp));
+    }
+    // follow camera
+    const bd = col.bound, cp = Math.cos(m.pitch);
+    const tx = m.x, ty = 1.1, tz = m.z;
+    let cx = tx + Math.sin(m.yaw) * cp * m.dist, cz = tz + Math.cos(m.yaw) * cp * m.dist;
+    cx = Math.max(bd.minX + 0.15, Math.min(bd.maxX - 0.15, cx));
+    cz = Math.max(bd.minZ + 0.15, Math.min(bd.maxZ + 3.2, cz));
+    this.camera.position.set(cx, ty + Math.sin(m.pitch) * m.dist, cz);
+    this.camera.lookAt(tx, ty, tz);
+    // nearest hotspot in reach
+    let best = null, bd2 = 1.6;
+    for (const h of this.hotspots) { const d = this.dist2(h); if (d < bd2) { bd2 = d; best = h; } }
+    const key = best ? best.id + best.state : "";
+    if (key !== (this.nearKey || "")) { this.nearKey = key; this.near = best; this.onNear(best ? { id: best.id, state: best.state, by: best.by, pos: best.bpos } : null); }
+    if (t - this.lastSend > 100) {
+      const cur = [Math.round(m.x * 100), Math.round(m.z * 100), Math.round(m.ry * 20)];
+      if (cur.some((v, i) => v !== this.lastSent[i])) { this.lastSent = cur; this.lastSend = t; this.onMove(m.x, m.z, m.ry); }
+    }
+  }
+
   frame(t) {
     if (!this.active || !this.orbit) return;
     const o = this.orbit;
-    if (this.ptr.size === 0) { // a little inertia
-      o.theta += o.vt; o.phi += o.vp; o.vt *= 0.9; o.vp *= 0.9;
-      this.clampOrbit();
+    if (this.mode === "walk") this.walkFrame(t);
+    else {
+      if (this.ptr.size === 0) { // a little inertia
+        o.theta += o.vt; o.phi += o.vp; o.vt *= 0.9; o.vp *= 0.9;
+        this.clampOrbit();
+      }
+      const sp = Math.sin(o.phi);
+      this.camera.position.set(o.target.x + o.radius * sp * Math.sin(o.theta), o.target.y + o.radius * Math.cos(o.phi), o.target.z + o.radius * sp * Math.cos(o.theta));
+      this.camera.lookAt(o.target);
     }
-    const sp = Math.sin(o.phi);
-    this.camera.position.set(o.target.x + o.radius * sp * Math.sin(o.theta), o.target.y + o.radius * Math.cos(o.phi), o.target.z + o.radius * sp * Math.cos(o.theta));
-    this.camera.lookAt(o.target);
     if (this.uvLight) this.uvLight.position.copy(this.camera.position);
     if (this.camLight) this.camLight.position.copy(this.camera.position);
     if (this.flickerT) { // I5 flicker envelope (~650 ms of unstable light)
