@@ -209,6 +209,11 @@ input:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px soli
 .entry-wrap{display:flex;flex-direction:column;min-height:0}
 .entry-side{display:flex;flex-direction:column}
 .entry-main{display:flex;flex-direction:column;min-height:0}
+/* fullscreen toggle: masthead row under the title (centred in portrait like
+   the title block, left-aligned in landscape like the rest of the side
+   column); the pressed state follows the game's accent "on" styling */
+.mast-fs{display:flex;justify-content:center}
+.fs-btn[aria-pressed="true"]{color:var(--acc)}
 .rotate-note{display:none;border:1px dashed var(--acc);border-radius:10px;padding:.5em .8em;color:var(--acc);font-family:system-ui,sans-serif;font-size:.85em;text-align:center;margin:.2em 0 .8em}
 
 /* ---- Round 3: portrait rotate hint (in-game only) ---- */
@@ -232,6 +237,7 @@ input:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px soli
   .entry-side .title-block h1{font-size:2em}
   .entry-side .rank-line{justify-content:flex-start;padding-top:0}
   .entry-side .daily-box{margin:.2em 0}
+  .entry-side .mast-fs{justify-content:flex-start}
   .entry-main{overflow-y:auto;padding-right:.3em}
   .entry-main .card-box{margin:.2em 0 .8em}
   /* game shell: stage left, tab rail right */

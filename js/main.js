@@ -11,6 +11,7 @@ import { createEvidencePanel } from "./panels/evidence.js";
 import { createSuspectsPanel } from "./panels/suspects.js";
 import { createBoardPanel } from "./panels/board.js";
 import { createChatPanel } from "./panels/chat.js";
+import { fullscreenButton } from "./fullscreen.js";
 import { recordKey, markPlayedToday, fmtTime, setCareerMeta } from "./progress.js";
 
 const root = document.getElementById("app");
@@ -78,7 +79,8 @@ function buildGame() {
     h("button", { class: "icon-btn", "aria-label": "Hint", onclick: hintSheet }, "💡"),
     h("button", { class: "icon-btn", "aria-label": "Case log", onclick: logSheet }, "📜"),
     h("button", { class: "icon-btn", "aria-label": "Party", onclick: partySheet }, "👥"),
-    h("button", { class: "icon-btn", "aria-label": "Settings", onclick: settingsSheet }, "⚙"));
+    h("button", { class: "icon-btn", "aria-label": "Settings", onclick: settingsSheet }, "⚙"),
+    fullscreenButton(true));
   const stage = h("div", { class: "stage" });
   const badges = {};
   const nav = h("nav", { class: "tabbar", role: "tablist" });

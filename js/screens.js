@@ -12,6 +12,7 @@ const MODS = [
 ];
 export const MOD_LABEL = { lightsout: "Lights Out", nonotes: "No Notes", speedrun: "Speedrun" };
 import { buildShareCard, shareResultCard, downloadResultCard, DIFF_LABEL } from "./sharecard.js";
+import { fullscreenButton } from "./fullscreen.js";
 import { replayOverlay } from "./replay.js";
 import { prologueOverlay } from "./prologue.js";
 
@@ -97,6 +98,7 @@ export function entryScreen({ code, cases, difficulties, onCreate, onJoin }) {
    h("div", { class: "entry-wrap" },
     h("div", { class: "entry-side" },
       h("div", { class: "title-block" }, h("p", { class: "eyebrow" }, "A co-op mystery for 1–4 detectives"), h("h1", {}, "Unsolved Case"), tag),
+      h("div", { class: "mast-fs" }, fullscreenButton(false)),
       rankLine,
       dailyBox),
     h("div", { class: "entry-main" },
