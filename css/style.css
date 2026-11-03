@@ -74,7 +74,7 @@ input:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px soli
 .sheet-body{overflow-y:auto;padding:.4em 1.1em calc(1.2em + var(--safe-b))}
 @keyframes fade{from{opacity:0}}@keyframes up{from{transform:translateY(40px);opacity:0}}
 #toasts{position:fixed;top:calc(.6em + var(--safe-t));left:0;right:0;z-index:100;display:flex;flex-direction:column;align-items:center;gap:.4em;pointer-events:none}
-.toast{background:#23283a;border:1px solid var(--line);border-radius:12px;padding:.6em 1em;max-width:90vw;font:.88em system-ui,sans-serif;box-shadow:0 6px 24px #0008;animation:up .2s}.toast.good{border-color:var(--good)}.toast.bad{border-color:var(--bad)}.toast.out{opacity:0;transition:opacity .3s}
+.toast{background:#23283a;border:1px solid var(--line);border-radius:12px;padding:.6em 1em;max-width:90vw;font:.88em system-ui,sans-serif;box-shadow:0 6px 24px #0008;animation:up .2s}.toast.good{border-color:var(--good)}.toast.bad{border-color:var(--bad)}.toast.out{opacity:0;transition:opacity .3s}p.bad{color:var(--bad)}
 .conn-banner{position:fixed;top:0;left:0;right:0;z-index:120;background:var(--bad);color:#200;text-align:center;padding:.4em;font:600 .85em system-ui,sans-serif}
 .float-emoji{position:fixed;bottom:70px;z-index:90;font-size:2.4em;text-align:center;animation:floatup 2.2s ease-out forwards;pointer-events:none}.float-emoji small{font-size:.28em}
 @keyframes floatup{to{transform:translateY(-40vh);opacity:0}}

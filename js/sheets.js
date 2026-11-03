@@ -332,6 +332,19 @@ export function voiceControls() {
           ? h("button", { class: "btn ptt", onpointerdown: () => v.talk(true), onpointerup: () => v.talk(false), onpointerleave: () => v.talk(false) }, "Hold to talk")
           : h("button", { class: "btn" + (v.micOn ? "" : " ghost"), onclick: () => v.setMic(!v.micOn) }, v.micOn ? "🎙 Mic on" : "🔇 Mic muted"),
         h("button", { class: "btn ghost", onclick: () => v.leave() }, "Leave voice")));
+      // Per-friend connection state: a failed peer used to be indistinguishable
+      // from a working one. Say so, in words, with the way out.
+      const others = (ctx.state.players || []).filter((p) => p.id !== ctx.state.you);
+      let anyFailed = false;
+      for (const p of others) {
+        if (!p.voice) { box.append(h("p", { class: "muted" }, `${p.name}: not in voice chat`)); continue; }
+        const st = v.peerState(p.id);
+        if (st === "connected") box.append(h("p", {}, `${p.name}: 🎙 connected`));
+        else if (st === "failed" || st === "closed") { anyFailed = true; box.append(h("p", { class: "bad" }, `${p.name}: couldn't connect`)); }
+        else if (st === "disconnected") box.append(h("p", { class: "muted" }, `${p.name}: connection unstable…`));
+        else box.append(h("p", { class: "muted" }, `${p.name}: connecting…`));
+      }
+      if (anyFailed) box.append(h("p", { class: "muted" }, "Voice travels phone-to-phone; some networks block the direct path. Both of you try leaving voice and rejoining — or switch between wifi and mobile data."));
     }
   };
   draw();

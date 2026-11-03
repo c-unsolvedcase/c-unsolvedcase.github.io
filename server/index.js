@@ -59,7 +59,26 @@ const WEEK = 7 * 24 * 3600 * 1000;
 function createServer(opts = {}) {
   const port = opts.port != null ? opts.port : Number(process.env.PORT || 3000);
   const dataDir = opts.dataDir || process.env.DATA_DIR || path.join(__dirname, "..", "data");
-  const iceServers = opts.iceServers || (process.env.ICE_SERVERS ? JSON.parse(process.env.ICE_SERVERS) : [{ urls: "stun:stun.l.google.com:19302" }]);
+  // ICE servers handed to voice-chat clients. ICE_SERVERS (JSON) overrides
+  // everything when set. Otherwise, when TURN_SECRET + TURN_URLS are set, each
+  // handout carries a short-lived TURN credential minted in the coturn
+  // --use-auth-secret scheme (username = unix expiry, credential =
+  // base64(HMAC-SHA1(secret, username))), so the long-lived secret never
+  // leaves the server and leaked credentials expire (TURN_TTL, default 12 h).
+  const iceOverride = opts.iceServers || (process.env.ICE_SERVERS ? JSON.parse(process.env.ICE_SERVERS) : null);
+  const turnSecret = opts.turnSecret || process.env.TURN_SECRET || null;
+  const turnUrls = opts.turnUrls || (process.env.TURN_URLS ? process.env.TURN_URLS.split(",").map((s) => s.trim()).filter(Boolean) : null);
+  const turnTtl = Number(opts.turnTtl || process.env.TURN_TTL || 43200);
+  function currentIceServers() {
+    if (iceOverride) return iceOverride;
+    const list = [{ urls: "stun:stun.l.google.com:19302" }];
+    if (turnSecret && turnUrls && turnUrls.length) {
+      const username = String(Math.floor(Date.now() / 1000) + turnTtl);
+      const credential = crypto.createHmac("sha1", turnSecret).update(username).digest("base64");
+      list.push({ urls: turnUrls, username, credential });
+    }
+    return list;
+  }
   const log = opts.log || ((...a) => console.log(new Date().toISOString(), ...a));
   fs.mkdirSync(dataDir, { recursive: true });
   const roomsFile = path.join(dataDir, "rooms.json");
@@ -158,7 +177,7 @@ function createServer(opts = {}) {
     let url;
     try { url = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch { res.writeHead(400); return res.end("bad request"); }
     if (url === "/api/health") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ ok: true, rooms: rooms.size })); }
-    if (url === "/api/config") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ iceServers })); }
+    if (url === "/api/config") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ iceServers: currentIceServers() })); }
     if (url === "/api/cases") { res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" }); return res.end(JSON.stringify(caseCatalogue())); }
     if (url === "/") url = "/index.html";
     if (!HAS_CLIENT_DIR && ROOT_DENY.has(url.split("/")[1])) { res.writeHead(404, { "content-type": "text/plain" }); return res.end("not found"); }
@@ -274,7 +293,7 @@ function createServer(opts = {}) {
     ctx.room = room;
     // info must describe the ROOM's case — a join hello carries no caseId,
     // so caseInfo(C) would ship Case 1's data to joiners of every other case.
-    send(ws, { t: "welcome", pid: p.id, token: p.token, code: room.code, info: caseInfo(room.C), ice: iceServers, backlog: room.backlog(p.id) });
+    send(ws, { t: "welcome", pid: p.id, token: p.token, code: room.code, info: caseInfo(room.C), ice: currentIceServers(), backlog: room.backlog(p.id) });
     flush(room);
     pushState(room);
     dirty = true;
